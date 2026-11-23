@@ -13,6 +13,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
+  <script type="importmap">{ "imports": { "mediabunny": "./vendor/mediabunny.min.mjs" } }</script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -104,6 +105,7 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
         <select id="quality">
           <option value="720">720p</option>
           <option value="1080">1080p</option>
+          <option value="2160">4K (si la cámara lo permite)</option>
         </select></label>
       <label class="check"><input id="mirror" type="checkbox"> Texto en espejo (para cristal de teleprompter)</label>
       <label class="check"><input id="autoAdvance" type="checkbox"> Pasar al siguiente clip al parar</label>
@@ -120,6 +122,16 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
     <ol id="clipList" class="clip-list"></ol>
 
     <section class="export">
+      <label class="field">
+        <span>Resolución del vídeo final (MP4)</span>
+        <select id="exportRes">
+          <option value="original">Original (sin reescalar)</option>
+          <option value="720">720p · HD</option>
+          <option value="1080">1080p · Full HD</option>
+          <option value="1440">1440p · 2K</option>
+          <option value="2160">2160p · 4K</option>
+        </select>
+      </label>
       <button id="exportBtn" class="primary big" type="button">Unir clips y exportar</button>
       <div id="exportProgress" class="progress" hidden><div></div></div>
       <p id="exportStatus" class="muted"></p>

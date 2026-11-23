@@ -14,17 +14,32 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
    - ▶ ensaya sin grabar. ⏮ ⏭ cambian de fragmento. ⟲ cambia de cámara.
    - ⚙ velocidad, tamaño de letra, alto y fondo del texto, cuenta atrás, calidad (720p/1080p),
      texto en espejo, avanzar al siguiente clip al parar y parar al acabar el texto.
-3. **Clips**: revisa cada toma, regrábala, descárgala o bórrala. **Unir clips y exportar** crea un único vídeo
-   que puedes descargar o compartir directamente.
+3. **Clips**: revisa cada toma, regrábala, descárgala o bórrala. **Unir clips y exportar** crea un único
+   vídeo **MP4 (H.264 + AAC)** que puedes descargar o compartir directamente.
+   Elige la resolución final: Original, 720p, 1080p, 1440p (2K) o **2160p (4K)**. Los clips se reescalan
+   (también hacia arriba) con suavizado de alta calidad. En vertical, 4K = 2160×3840.
+
+## Exportación
+
+- **Formato**: siempre MP4. Vídeo H.264 (si el dispositivo no puede a esa resolución, prueba H.265, VP9 o AV1
+  dentro del MP4) y audio AAC. Si el navegador no tiene codificador AAC (Firefox, algunos Chrome), se usa uno
+  WebAssembly incluido en la app.
+- **Sin recodificar**: si los clips ya son H.264/AAC del mismo tamaño y eliges «Original», se unen al instante y sin pérdida.
+- **Proporción**: si es casi estándar (9:16, 16:9, 1:1, 4:5, 3:4) se ajusta a la medida exacta. Un clip con
+  otra proporción se encaja con bandas negras, sin recortar.
+- **Memoria**: el MP4 se escribe directamente en el almacenamiento privado del navegador (OPFS) cuando está
+  disponible, para que un 4K largo no agote la RAM del móvil.
+- Calidad de exportación: ~0,1 bits por píxel (≈6 Mbps en 1080p, ≈25 Mbps en 4K).
+- La grabación admite 720p, 1080p y 4K si la cámara del móvil lo permite.
 
 ## Cómo funciona por dentro
 
 | Parte | Tecnología |
 |---|---|
 | Cámara y micrófono | `getUserMedia` |
-| Grabación de cada clip | `MediaRecorder` (MP4 en iPhone, WebM en Android/Chrome) |
+| Grabación de cada clip | `MediaRecorder`: MP4 H.264 si el navegador lo permite (iPhone, Chrome reciente) y si no WebM |
 | Almacenamiento | IndexedDB para los clips y `localStorage` para el guion y los ajustes |
-| Unir clips | [Mediabunny](https://github.com/Vanilagy/mediabunny) (MPL-2.0, incluida en `vendor/`). Si todos los clips tienen el mismo formato, los copia sin recodificar (instantáneo). Si no, recodifica a un tamaño y audio comunes |
+| Unir, reescalar y exportar a MP4 | [Mediabunny](https://github.com/Vanilagy/mediabunny) + `@mediabunny/aac-encoder` (MPL-2.0, incluidas en `vendor/`), sobre WebCodecs |
 | Sin conexión | Service worker (`sw.js`) |
 
 No hay paso de compilación: es HTML, CSS y JavaScript sin dependencias que instalar.

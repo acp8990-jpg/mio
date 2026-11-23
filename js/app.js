@@ -15,6 +15,7 @@ const DEFAULTS = {
   bgOpacity: 55,
   countdown: 3,
   quality: 1080,
+  exportRes: 1080,
   mirror: false,
   autoAdvance: true,
   autoStop: false,
@@ -189,6 +190,12 @@ $('quality').addEventListener('change', async (e) => {
   if (!$('view-record').hidden && !state.recording) await startCamera();
 });
 
+$('exportRes').value = String(state.settings.exportRes);
+$('exportRes').addEventListener('change', (e) => {
+  const v = e.target.value;
+  setSetting('exportRes', v === 'original' ? 'original' : Number(v));
+});
+
 $('openSettings').addEventListener('click', () => {
   if (!state.recording) $('settings').hidden = false;
 });
@@ -197,13 +204,17 @@ $('closeSettings').addEventListener('click', () => ($('settings').hidden = true)
 // ---------------------------------------------------------------- cámara
 
 function pickMime() {
+  // MP4 solo si es H.264 de verdad (se une sin recodificar). Un «video/mp4» genérico en Chrome puede
+  // salir como VP9-en-MP4 con metadatos que luego no se pueden decodificar, así que va al final (Safari).
   const candidates = [
+    'video/mp4;codecs=avc1.640028,mp4a.40.2',
+    'video/mp4;codecs=avc1.4D401F,mp4a.40.2',
     'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
     'video/mp4;codecs=avc1,mp4a',
-    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
     'video/webm',
+    'video/mp4',
   ];
   if (typeof MediaRecorder === 'undefined') return null;
   return candidates.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
@@ -218,7 +229,7 @@ function stopCamera() {
 async function startCamera() {
   stopCamera();
   $('camError').hidden = true;
-  const q = state.settings.quality === 720 ? [720, 1280] : [1080, 1920];
+  const q = { 720: [720, 1280], 1080: [1080, 1920], 2160: [2160, 3840] }[state.settings.quality] ?? [1080, 1920];
   const portrait = window.innerHeight >= window.innerWidth;
   const [w, h] = portrait ? q : [q[1], q[0]];
   try {
@@ -384,7 +395,7 @@ async function startRecording() {
     return;
   }
 
-  const bitrate = state.settings.quality === 720 ? 5_000_000 : 8_000_000;
+  const bitrate = { 720: 5_000_000, 1080: 10_000_000, 2160: 35_000_000 }[state.settings.quality] ?? 10_000_000;
   const chunks = [];
   const rec = new MediaRecorder(state.stream, {
     ...(mime ? { mimeType: mime } : {}),
@@ -621,9 +632,14 @@ $('exportBtn').addEventListener('click', async () => {
   status.textContent = 'Uniendo clips en tu dispositivo…';
   try {
     const { joinClips } = await import('./export.js');
+    const resolution = state.settings.exportRes;
+    if (resolution !== 'original') status.textContent = `Reescalando a ${resolution}p y codificando MP4…`;
     const result = await joinClips(
       clips.map((c) => c.blob),
-      (p) => (bar.firstElementChild.style.width = `${Math.round(p * 100)}%`),
+      {
+        resolution,
+        onProgress: (p) => (bar.firstElementChild.style.width = `${Math.round(p * 100)}%`),
+      },
     );
     if (state.exportUrl) URL.revokeObjectURL(state.exportUrl);
     state.exportUrl = URL.createObjectURL(result.blob);
@@ -633,7 +649,8 @@ $('exportBtn').addEventListener('click', async () => {
     $('exportResult').hidden = false;
     $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
     const mb = (result.blob.size / 1048576).toFixed(1);
-    status.textContent = `Listo: ${clips.length} clips · ${mb} MB · ${result.ext.toUpperCase()} (${result.mode}).`;
+    status.textContent =
+      `Listo: ${clips.length} clips · ${result.width}×${result.height} · ${mb} MB · MP4 (${result.mode}).`;
     bar.firstElementChild.style.width = '100%';
   } catch (err) {
     console.error(err);
