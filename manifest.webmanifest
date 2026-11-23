@@ -1,0 +1,17 @@
+{
+  "name": "TeleClip – Teleprompter clip a clip",
+  "short_name": "TeleClip",
+  "description": "Teleprompter sin límite de caracteres que graba clip a clip y une los clips en el móvil.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0f13",
+  "theme_color": "#0e0f13",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

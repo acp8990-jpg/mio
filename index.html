@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TeleClip</title>
+  <meta name="description" content="Teleprompter sin límite de caracteres que graba clip a clip y une los clips en el móvil.">
+  <meta name="theme-color" content="#0e0f13">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <!-- 1. GUION -->
+  <main id="view-script" class="view">
+    <header class="bar">
+      <h1>TeleClip</h1>
+      <span id="charCount" class="muted"></span>
+    </header>
+
+    <textarea id="script" spellcheck="true" placeholder="Pega o escribe tu guion. Sin límite de caracteres.
+
+Deja una línea en blanco entre párrafos: cada párrafo será un clip."></textarea>
+
+    <div class="row wrap">
+      <label class="field">
+        <span>Dividir en clips por</span>
+        <select id="splitMode">
+          <option value="paragraphs">Párrafos (línea en blanco)</option>
+          <option value="lines">Cada línea</option>
+          <option value="sentences">Cada frase</option>
+          <option value="none">Todo en un solo clip</option>
+        </select>
+      </label>
+      <button id="importBtn" class="ghost" type="button">Importar .txt</button>
+      <input id="importFile" type="file" accept=".txt,.md,text/plain" hidden>
+    </div>
+
+    <h2 class="section-title">Clips del guion <span id="segCount" class="muted"></span></h2>
+    <ol id="segPreview" class="seg-preview"></ol>
+
+    <div class="sticky-actions">
+      <button id="goRecord" class="primary big" type="button">● Grabar</button>
+    </div>
+  </main>
+
+  <!-- 2. GRABACIÓN -->
+  <main id="view-record" class="view rec" hidden>
+    <video id="preview" playsinline muted autoplay></video>
+
+    <div id="prompter" class="prompter">
+      <div id="prompterScroll" class="prompter-scroll">
+        <div id="prompterText" class="prompter-text"></div>
+      </div>
+      <div class="reading-line" aria-hidden="true"></div>
+      <div id="pausedBadge" class="paused-badge" hidden>Pausa · toca para seguir</div>
+    </div>
+
+    <div class="rec-top">
+      <button id="recBack" class="icon" type="button" aria-label="Volver">‹</button>
+      <div class="rec-info">
+        <div id="segLabel" class="seg-label"></div>
+        <div id="recTimer" class="rec-timer" hidden>00:00</div>
+      </div>
+      <button id="openSettings" class="icon" type="button" aria-label="Ajustes">⚙</button>
+    </div>
+
+    <div id="countdown" class="countdown" hidden></div>
+    <div id="camError" class="cam-error" hidden></div>
+
+    <div class="rec-bottom">
+      <button id="prevSeg" class="icon" type="button" aria-label="Clip anterior">⏮</button>
+      <button id="rehearse" class="icon" type="button" aria-label="Ensayar sin grabar">▶</button>
+      <button id="recBtn" class="rec-btn" type="button" aria-label="Grabar"><span></span></button>
+      <button id="flipCam" class="icon" type="button" aria-label="Cambiar cámara">⟲</button>
+      <button id="nextSeg" class="icon" type="button" aria-label="Clip siguiente">⏭</button>
+    </div>
+
+    <section id="settings" class="sheet" hidden>
+      <div class="sheet-head">
+        <h2>Teleprompter</h2>
+        <button id="closeSettings" class="ghost" type="button">Listo</button>
+      </div>
+      <label class="slider"><span>Velocidad <b id="speedVal"></b></span>
+        <input id="speed" type="range" min="1" max="30" step="1"></label>
+      <label class="slider"><span>Tamaño de letra <b id="fontVal"></b></span>
+        <input id="fontSize" type="range" min="18" max="80" step="1"></label>
+      <label class="slider"><span>Alto del texto <b id="heightVal"></b></span>
+        <input id="boxHeight" type="range" min="20" max="90" step="1"></label>
+      <label class="slider"><span>Fondo del texto <b id="opacityVal"></b></span>
+        <input id="bgOpacity" type="range" min="0" max="100" step="5"></label>
+      <label class="field"><span>Cuenta atrás</span>
+        <select id="countdownSel">
+          <option value="0">Sin cuenta atrás</option>
+          <option value="3">3 segundos</option>
+          <option value="5">5 segundos</option>
+        </select></label>
+      <label class="field"><span>Calidad</span>
+        <select id="quality">
+          <option value="720">720p</option>
+          <option value="1080">1080p</option>
+        </select></label>
+      <label class="check"><input id="mirror" type="checkbox"> Texto en espejo (para cristal de teleprompter)</label>
+      <label class="check"><input id="autoAdvance" type="checkbox"> Pasar al siguiente clip al parar</label>
+      <label class="check"><input id="autoStop" type="checkbox"> Parar la grabación al acabar el texto</label>
+    </section>
+  </main>
+
+  <!-- 3. CLIPS -->
+  <main id="view-clips" class="view" hidden>
+    <header class="bar">
+      <h1>Clips</h1>
+      <button id="clearAll" class="ghost danger" type="button">Borrar todos</button>
+    </header>
+    <ol id="clipList" class="clip-list"></ol>
+
+    <section class="export">
+      <button id="exportBtn" class="primary big" type="button">Unir clips y exportar</button>
+      <div id="exportProgress" class="progress" hidden><div></div></div>
+      <p id="exportStatus" class="muted"></p>
+      <div id="exportResult" hidden>
+        <video id="exportVideo" controls playsinline></video>
+        <div class="row">
+          <button id="downloadExport" class="primary" type="button">Descargar</button>
+          <button id="shareExport" class="ghost" type="button" hidden>Compartir</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <nav id="tabs" class="tabs">
+    <button data-view="script" class="active" type="button">Guion</button>
+    <button data-view="clips" type="button">Clips <span id="clipBadge" class="badge" hidden></span></button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>
