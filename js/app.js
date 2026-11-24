@@ -2,6 +2,9 @@ import {
   putClip, getClips, deleteClip, clearClips,
   loadJSON, saveJSON, loadText, saveText, requestPersistence,
 } from './storage.js';
+import { Camera, outputSize } from './camera.js';
+import { ADJUST_DEFAULTS, PRESETS } from './grade.js';
+import { tokenize, ScriptMatcher, SpeechFollower, LevelFollower, speechSupported } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 const SCRIPT_KEY = 'teleclip.script';
@@ -15,6 +18,17 @@ const DEFAULTS = {
   bgOpacity: 55,
   countdown: 3,
   quality: 1080,
+  orientation: 'vertical',
+  fps: 30,
+  bitrateLevel: 'high',
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
+  voiceMode: 'speech',
+  voiceLang: 'es-ES',
+  voiceSens: 50,
+  adjust: {},
+  preset: 'natural',
   exportRes: 1080,
   mirror: false,
   autoAdvance: true,
@@ -27,8 +41,14 @@ const state = {
   segments: [],
   clips: new Map(), // seg -> clip
   current: 0,
-  stream: null,
   recorder: null,
+  words: [],
+  spans: [],
+  matcher: null,
+  readPos: 0,
+  following: false,
+  activeVoice: 'off',
+  voiceSpeaking: false,
   recording: false,
   recStart: 0,
   scrolling: false,
@@ -149,6 +169,21 @@ function setSetting(key, value) {
   applySettings();
 }
 
+const voiceMode = () =>
+  state.settings.voiceMode === 'speech' && !speechSupported() ? 'level' : state.settings.voiceMode;
+
+function bitrates() {
+  const s = state.settings;
+  const { width, height } = outputSize(s.quality, s.orientation);
+  const bpp = { standard: 0.08, high: 0.15, max: 0.25 }[s.bitrateLevel] ?? 0.15;
+  return {
+    video: Math.min(80_000_000, Math.round(width * height * s.fps * bpp)),
+    audio: { standard: 128_000, high: 192_000, max: 256_000 }[s.bitrateLevel] ?? 192_000,
+    width,
+    height,
+  };
+}
+
 function applySettings() {
   const s = state.settings;
   const p = $('prompter');
@@ -161,6 +196,39 @@ function applySettings() {
   $('heightVal').textContent = `${s.boxHeight}%`;
   $('opacityVal').textContent = `${s.bgOpacity}%`;
   $('preview').classList.toggle('mirror', s.facing === 'user');
+
+  const horizontal = s.orientation === 'horizontal';
+  const ob = $('orientBtn');
+  const icon = document.createElement('span');
+  icon.className = `ar ${horizontal ? 'h' : 'v'}`;
+  ob.replaceChildren(icon, horizontal ? '16:9' : '9:16');
+  $('view-record').classList.toggle('horizontal', horizontal);
+  document.querySelectorAll('#orientToggle button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.orient === s.orientation),
+  );
+
+  const vm = voiceMode();
+  $('voiceBtn').textContent = { speech: '🎙 Voz', level: '🎙 Al hablar', off: '⏩ Fijo' }[vm];
+  $('voiceBtn').classList.toggle('on', vm !== 'off');
+  $('voiceMode').value = vm;
+  $('voiceLangField').hidden = vm !== 'speech';
+  $('sensField').hidden = vm !== 'level';
+  $('micMeter').hidden = vm !== 'level';
+  $('sensVal').textContent = `${s.voiceSens}%`;
+  $('voiceHelp').textContent = {
+    speech: 'El teleprompter escucha y va a la palabra que estás diciendo: si te paras, se para; si te saltas una frase, salta. Necesita conexión a internet.',
+    level: 'El texto avanza a la velocidad elegida solo mientras hablas y se detiene en las pausas. Funciona sin conexión.',
+    off: 'El texto avanza siempre a la velocidad elegida en la pestaña Texto.',
+  }[vm] + (s.voiceMode === 'speech' && !speechSupported()
+    ? ' (Este navegador no tiene reconocimiento de voz: usando «mientras hablo».)'
+    : '');
+
+  const br = bitrates();
+  const mbMin = ((br.video + br.audio) * 60) / 8 / 1e6;
+  $('recInfo').textContent =
+    `Se grabará a ${br.width}×${br.height} · ${s.fps} fps · ${(br.video / 1e6).toFixed(0)} Mbps (≈${Math.round(mbMin)} MB por minuto).`;
+  camera.setAdjust(s.adjust);
+  updateRotateHint();
 }
 
 function bindRange(id, key) {
@@ -172,23 +240,38 @@ bindRange('speed', 'speed');
 bindRange('fontSize', 'fontSize');
 bindRange('boxHeight', 'boxHeight');
 bindRange('bgOpacity', 'bgOpacity');
+bindRange('voiceSens', 'voiceSens');
 
-function bindCheck(id, key) {
+function bindCheck(id, key, onChange) {
   const el = $(id);
   el.checked = !!state.settings[key];
-  el.addEventListener('change', () => setSetting(key, el.checked));
+  el.addEventListener('change', () => {
+    setSetting(key, el.checked);
+    onChange?.();
+  });
 }
+const reopenCamera = () => !$('view-record').hidden && !state.recording && startCamera();
 bindCheck('mirror', 'mirror');
 bindCheck('autoAdvance', 'autoAdvance');
 bindCheck('autoStop', 'autoStop');
+bindCheck('noiseSuppression', 'noiseSuppression', reopenCamera);
+bindCheck('echoCancellation', 'echoCancellation', reopenCamera);
+bindCheck('autoGainControl', 'autoGainControl', reopenCamera);
 
-$('countdownSel').value = String(state.settings.countdown);
-$('countdownSel').addEventListener('change', (e) => setSetting('countdown', Number(e.target.value)));
-$('quality').value = String(state.settings.quality);
-$('quality').addEventListener('change', async (e) => {
-  setSetting('quality', Number(e.target.value));
-  if (!$('view-record').hidden && !state.recording) await startCamera();
-});
+function bindSelect(id, key, { numeric = false, onChange } = {}) {
+  const el = $(id);
+  el.value = String(state.settings[key]);
+  el.addEventListener('change', () => {
+    setSetting(key, numeric ? Number(el.value) : el.value);
+    onChange?.();
+  });
+}
+bindSelect('countdownSel', 'countdown', { numeric: true });
+bindSelect('quality', 'quality', { numeric: true, onChange: reopenCamera });
+bindSelect('fps', 'fps', { numeric: true, onChange: reopenCamera });
+bindSelect('bitrateLevel', 'bitrateLevel');
+bindSelect('voiceLang', 'voiceLang');
+bindSelect('voiceMode', 'voiceMode', { onChange: restartVoiceIfActive });
 
 $('exportRes').value = String(state.settings.exportRes);
 $('exportRes').addEventListener('change', (e) => {
@@ -196,12 +279,203 @@ $('exportRes').addEventListener('change', (e) => {
   setSetting('exportRes', v === 'original' ? 'original' : Number(v));
 });
 
-$('openSettings').addEventListener('click', () => {
-  if (!state.recording) $('settings').hidden = false;
+function setOrientation(o) {
+  if (state.recording || state.settings.orientation === o) return;
+  setSetting('orientation', o);
+  reopenCamera();
+}
+document.querySelectorAll('#orientToggle button').forEach((b) =>
+  b.addEventListener('click', () => setOrientation(b.dataset.orient)),
+);
+$('orientBtn').addEventListener('click', () =>
+  setOrientation(state.settings.orientation === 'horizontal' ? 'vertical' : 'horizontal'),
+);
+
+$('voiceBtn').addEventListener('click', () => {
+  const order = speechSupported() ? ['speech', 'level', 'off'] : ['level', 'off'];
+  const next = order[(order.indexOf(voiceMode()) + 1) % order.length];
+  setSetting('voiceMode', next);
+  toast({ speech: 'El texto sigue tus palabras', level: 'El texto avanza mientras hablas', off: 'Velocidad fija' }[next]);
+  restartVoiceIfActive();
 });
-$('closeSettings').addEventListener('click', () => ($('settings').hidden = true));
+
+// Pestañas del panel de ajustes
+document.querySelectorAll('.tabs-inline button').forEach((b) =>
+  b.addEventListener('click', () => showSettingsTab(b.dataset.tab)),
+);
+function showSettingsTab(tab) {
+  document.querySelectorAll('.tabs-inline button').forEach((x) => x.classList.toggle('active', x.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach((p) => (p.hidden = p.dataset.panel !== tab));
+  $('settings').classList.toggle('compact', tab === 'image');
+  if (tab === 'voice') startMeter();
+  else stopMeter();
+}
+
+$('openSettings').addEventListener('click', () => {
+  if (state.recording) return;
+  $('settings').hidden = false;
+  const active = document.querySelector('.tabs-inline button.active')?.dataset.tab ?? 'text';
+  showSettingsTab(active);
+});
+$('closeSettings').addEventListener('click', () => {
+  $('settings').hidden = true;
+  stopMeter();
+});
+
+// ---------------------------------------------------------------- imagen
+
+const ADJUSTERS = [
+  ['exposure', 'Exposición', -2, 2],
+  ['brightness', 'Brillo', -1, 1],
+  ['contrast', 'Contraste', -1, 1],
+  ['highlights', 'Luces', -1, 1],
+  ['shadows', 'Sombras', -1, 1],
+  ['saturation', 'Saturación', -1, 1],
+  ['vibrance', 'Intensidad del color', -1, 1],
+  ['temperature', 'Temperatura', -1, 1],
+  ['tint', 'Tinte', -1, 1],
+  ['sharpness', 'Nitidez', 0, 1],
+  ['smoothing', 'Suavizar piel', 0, 1],
+  ['vignette', 'Viñeta', 0, 1],
+];
+
+function buildImagePanel() {
+  const chips = $('presets');
+  for (const [key, p] of Object.entries(PRESETS)) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.preset = key;
+    b.textContent = p.label;
+    b.addEventListener('click', () => {
+      setSetting('adjust', { ...ADJUST_DEFAULTS, ...p.values });
+      setSetting('preset', key);
+      syncImagePanel();
+    });
+    chips.append(b);
+  }
+  const box = $('adjustSliders');
+  for (const [key, label, min, max] of ADJUSTERS) {
+    const wrap = document.createElement('label');
+    wrap.className = 'slider';
+    const head = document.createElement('span');
+    head.append(label + ' ');
+    const val = document.createElement('b');
+    val.id = `adj-${key}-val`;
+    head.append(val);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.id = `adj-${key}`;
+    input.min = String(min * 100);
+    input.max = String(max * 100);
+    input.step = '1';
+    input.addEventListener('input', () => {
+      setSetting('adjust', { ...state.settings.adjust, [key]: Number(input.value) / 100 });
+      setSetting('preset', null);
+      syncImagePanel();
+    });
+    input.addEventListener('dblclick', () => {
+      setSetting('adjust', { ...state.settings.adjust, [key]: 0 });
+      syncImagePanel();
+    });
+    wrap.append(head, input);
+    box.append(wrap);
+  }
+  $('resetAdjust').addEventListener('click', () => {
+    setSetting('adjust', { ...ADJUST_DEFAULTS });
+    setSetting('preset', 'natural');
+    syncImagePanel();
+  });
+  syncImagePanel();
+}
+
+function syncImagePanel() {
+  const a = { ...ADJUST_DEFAULTS, ...state.settings.adjust };
+  for (const [key] of ADJUSTERS) {
+    const v = Math.round(a[key] * 100);
+    $(`adj-${key}`).value = String(v);
+    $(`adj-${key}-val`).textContent = v > 0 && key !== 'sharpness' && key !== 'smoothing' && key !== 'vignette' ? `+${v}` : String(v);
+  }
+  document.querySelectorAll('#presets button').forEach((b) =>
+    b.classList.toggle('active', b.dataset.preset === state.settings.preset),
+  );
+}
+
+/** Controles propios de la cámara del móvil (solo los que el dispositivo admite). */
+function renderHardware() {
+  const box = $('hwControls');
+  box.replaceChildren();
+  const hw = camera.hardware();
+  const rows = [];
+  const slider = (key, label, cfg, fmt = (v) => v.toFixed(1)) => {
+    const wrap = document.createElement('label');
+    wrap.className = 'slider';
+    const head = document.createElement('span');
+    const b = document.createElement('b');
+    b.textContent = fmt(cfg.value);
+    head.append(label + ' ', b);
+    const input = document.createElement('input');
+    input.type = 'range';
+    Object.assign(input, { min: cfg.min, max: cfg.max, step: cfg.step, value: cfg.value });
+    input.addEventListener('input', () => {
+      b.textContent = fmt(Number(input.value));
+      camera.setHardware(key, Number(input.value));
+    });
+    wrap.append(head, input);
+    rows.push(wrap);
+    return input;
+  };
+  const autoToggle = (label, onAuto) => {
+    const l = document.createElement('label');
+    l.className = 'check';
+    const c = document.createElement('input');
+    c.type = 'checkbox';
+    c.checked = true;
+    l.append(c, ` ${label}`);
+    rows.push(l);
+    return c;
+  };
+  if (hw.zoom) slider('zoom', 'Zoom', hw.zoom, (v) => `${v.toFixed(1)}×`);
+  if (hw.exposureCompensation) slider('exposureCompensation', 'Exposición de la cámara', hw.exposureCompensation);
+  if (hw.colorTemperature) {
+    const auto = autoToggle('Balance de blancos automático');
+    const input = slider('colorTemperature', 'Balance de blancos', hw.colorTemperature, (v) => `${Math.round(v)} K`);
+    input.disabled = true;
+    auto.addEventListener('change', () => {
+      input.disabled = auto.checked;
+      camera.setHardware('colorTemperature', auto.checked ? 0 : Number(input.value));
+    });
+  }
+  if (hw.focusDistance) {
+    const auto = autoToggle('Enfoque automático');
+    const input = slider('focusDistance', 'Enfoque manual', hw.focusDistance, (v) => v.toFixed(2));
+    input.disabled = true;
+    auto.addEventListener('change', () => {
+      input.disabled = auto.checked;
+      camera.setHardware('focusDistance', auto.checked ? 0 : Number(input.value));
+    });
+  }
+  if (hw.torch) {
+    const l = document.createElement('label');
+    l.className = 'check';
+    const c = document.createElement('input');
+    c.type = 'checkbox';
+    c.checked = hw.torch.value;
+    c.addEventListener('change', () => camera.setHardware('torch', c.checked));
+    l.append(c, ' Linterna / luz');
+    rows.push(l);
+  }
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'muted';
+    p.textContent = 'Este navegador no deja ajustar la cámara directamente. Usa los ajustes de imagen de arriba.';
+    rows.push(p);
+  }
+  box.append(...rows);
+}
 
 // ---------------------------------------------------------------- cámara
+
+const camera = new Camera($('preview'));
 
 function pickMime() {
   // MP4 solo si es H.264 de verdad (se une sin recodificar). Un «video/mp4» genérico en Chrome puede
@@ -221,29 +495,26 @@ function pickMime() {
 }
 
 function stopCamera() {
-  state.stream?.getTracks().forEach((t) => t.stop());
-  state.stream = null;
-  $('preview').srcObject = null;
+  camera.close();
 }
 
 async function startCamera() {
-  stopCamera();
   $('camError').hidden = true;
-  const q = { 720: [720, 1280], 1080: [1080, 1920], 2160: [2160, 3840] }[state.settings.quality] ?? [1080, 1920];
-  const portrait = window.innerHeight >= window.innerWidth;
-  const [w, h] = portrait ? q : [q[1], q[0]];
+  const s = state.settings;
   try {
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: state.settings.facing,
-        width: { ideal: w },
-        height: { ideal: h },
-        frameRate: { ideal: 30 },
+    await camera.open({
+      facing: s.facing,
+      orientation: s.orientation,
+      quality: s.quality,
+      fps: s.fps,
+      audio: {
+        noiseSuppression: s.noiseSuppression,
+        echoCancellation: s.echoCancellation,
+        autoGainControl: s.autoGainControl,
       },
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    $('preview').srcObject = state.stream;
-    applySettings();
+    camera.setAdjust(s.adjust);
+    renderHardware();
   } catch (err) {
     console.error(err);
     const el = $('camError');
@@ -253,7 +524,20 @@ async function startCamera() {
         : `No se pudo abrir la cámara (${err?.name || err}). La app necesita HTTPS o localhost.`;
     el.hidden = false;
   }
+  updateRotateHint();
 }
+
+function updateRotateHint() {
+  const touch = matchMedia('(pointer: coarse)').matches;
+  const portraitScreen = innerHeight >= innerWidth;
+  const wantH = state.settings.orientation === 'horizontal';
+  const hint = $('rotateHint');
+  hint.hidden = !touch || $('view-record').hidden || portraitScreen !== wantH;
+  hint.textContent = wantH
+    ? 'Gira el móvil para grabar en horizontal con toda la calidad'
+    : 'Pon el móvil en vertical para grabar en 9:16 con toda la calidad';
+}
+addEventListener('resize', updateRotateHint);
 
 async function keepAwake(on) {
   try {
@@ -282,11 +566,53 @@ let lastFrame = 0;
 let carry = 0;
 let endTimer = 0;
 
-function loadSegment(i) {
-  state.current = Math.max(0, Math.min(i, state.segments.length - 1));
-  $('prompterText').textContent = state.segments[state.current] ?? '';
+/** Pinta el fragmento palabra a palabra para poder resaltar y seguir la lectura. */
+function renderPrompterText(text) {
+  const el = $('prompterText');
+  el.replaceChildren();
+  state.words = tokenize(text);
+  state.spans = [];
+  let last = 0;
+  for (const w of state.words) {
+    if (w.start > last) el.append(text.slice(last, w.start));
+    const span = document.createElement('span');
+    span.className = 'w';
+    span.textContent = text.slice(w.start, w.end);
+    el.append(span);
+    state.spans.push(span);
+    last = w.end;
+  }
+  if (last < text.length) el.append(text.slice(last));
+  state.matcher = new ScriptMatcher(state.words);
+  state.readPos = 0;
   scroller.scrollTop = 0;
   carry = 0;
+}
+
+function setReadPos(pos) {
+  const spans = state.spans;
+  const old = state.readPos;
+  pos = Math.max(0, Math.min(pos, spans.length));
+  if (pos === old) return;
+  if (pos > old) for (let i = old; i < pos; i++) spans[i].classList.add('read');
+  else for (let i = pos; i < old; i++) spans[i].classList.remove('read');
+  spans[old]?.classList.remove('cur');
+  spans[pos]?.classList.add('cur');
+  state.readPos = pos;
+  if (pos >= spans.length) onTextEnd();
+}
+
+function onTextEnd() {
+  if (state.recording && state.settings.autoStop) {
+    clearTimeout(endTimer);
+    endTimer = setTimeout(() => state.recording && stopRecording(), 1200);
+  }
+}
+
+function loadSegment(i) {
+  stopFollowing();
+  state.current = Math.max(0, Math.min(i, state.segments.length - 1));
+  renderPrompterText(state.segments[state.current] ?? '');
   const has = state.clips.has(state.current);
   $('segLabel').textContent =
     `Clip ${state.current + 1} / ${state.segments.length}` + (has ? ' · ✓ grabado (se reemplazará)' : '');
@@ -294,10 +620,17 @@ function loadSegment(i) {
   $('nextSeg').disabled = state.current >= state.segments.length - 1;
 }
 
+/** Posición de scroll que deja la palabra `i` sobre la línea de lectura. */
+function scrollTargetFor(i) {
+  const span = state.spans[Math.min(i, state.spans.length - 1)];
+  if (!span) return 0;
+  return span.offsetTop + span.offsetHeight / 2 - scroller.clientHeight * 0.3;
+}
+
 function setScrolling(on) {
   state.scrolling = on;
-  $('rehearse').textContent = on && !state.recording ? '⏸' : '▶';
-  $('pausedBadge').hidden = on || !(state.recording || scroller.scrollTop > 0);
+  $('rehearse').textContent = state.following && !state.recording ? '⏸' : '▶';
+  $('pausedBadge').hidden = on || !state.following;
   if (on) {
     lastFrame = performance.now();
     requestAnimationFrame(tick);
@@ -308,51 +641,174 @@ function tick(now) {
   if (!state.scrolling) return;
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
-  carry += state.settings.speed * 8 * dt;
-  const whole = Math.floor(carry);
-  if (whole > 0) {
-    scroller.scrollTop += whole;
-    carry -= whole;
-  }
-  const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-  if (atEnd) {
-    setScrolling(false);
-    $('pausedBadge').hidden = true;
-    if (state.recording && state.settings.autoStop) {
-      clearTimeout(endTimer);
-      endTimer = setTimeout(() => state.recording && stopRecording(), 1200);
+  const mode = state.activeVoice;
+  const atEnd = () => scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+
+  if (mode === 'speech') {
+    // Desplazamiento suave hacia la palabra que se está diciendo.
+    const target = Math.max(0, scrollTargetFor(state.readPos));
+    const diff = target - scroller.scrollTop;
+    if (Math.abs(diff) > 0.5) {
+      carry += diff * Math.min(1, dt * 5);
+      const whole = Math.trunc(carry);
+      if (whole) {
+        scroller.scrollTop += whole;
+        carry -= whole;
+      }
     }
-    return;
+  } else {
+    const moving = mode !== 'level' || state.voiceSpeaking;
+    if (moving) {
+      carry += state.settings.speed * 8 * dt;
+      const whole = Math.floor(carry);
+      if (whole > 0) {
+        scroller.scrollTop += whole;
+        carry -= whole;
+      }
+      // Resaltado aproximado de lo ya leído en los modos sin reconocimiento.
+      const line = scroller.scrollTop + scroller.clientHeight * 0.3;
+      let p = state.readPos;
+      while (p < state.spans.length && state.spans[p].offsetTop + state.spans[p].offsetHeight / 2 < line) p++;
+      if (p !== state.readPos) setReadPos(p);
+    }
+    if (atEnd()) {
+      setReadPos(state.spans.length);
+      setScrolling(false);
+      $('pausedBadge').hidden = true;
+      return;
+    }
   }
   requestAnimationFrame(tick);
 }
 
-// Tocar el texto pausa / reanuda. Arrastrar lo mueve a mano.
+// Tocar el texto pausa / reanuda. Arrastrarlo lo mueve a mano (y la lectura se resincroniza).
 let downY = null;
 scroller.addEventListener('pointerdown', (e) => (downY = e.clientY));
 scroller.addEventListener('pointerup', (e) => {
-  if (downY !== null && Math.abs(e.clientY - downY) < 8 && !state.countingDown) {
-    if (state.scrolling) setScrolling(false);
-    else if (state.recording || scroller.scrollTop > 0) setScrolling(true);
-  }
+  if (downY === null || state.countingDown) return;
+  const moved = Math.abs(e.clientY - downY) >= 8;
   downY = null;
+  if (!moved) {
+    if (state.following) setScrolling(!state.scrolling);
+    return;
+  }
+  // Tras arrastrar: la palabra que queda en la línea de lectura pasa a ser la actual.
+  setTimeout(() => {
+    const line = scroller.scrollTop + scroller.clientHeight * 0.3;
+    let idx = state.spans.findIndex((s) => s.offsetTop + s.offsetHeight / 2 >= line);
+    if (idx < 0) idx = state.spans.length;
+    state.matcher?.reset(idx);
+    setReadPos(idx);
+    carry = 0;
+  }, 120);
 });
+
+// ---------------------------------------------------------------- seguir la voz
+
+const level = new LevelFollower({
+  onSpeaking: (on) => {
+    state.voiceSpeaking = on;
+    $('voiceBadge').classList.toggle('live', on);
+  },
+});
+let speech = null;
+
+/** Empieza a mover el texto (ensayo o grabación) con el modo de voz elegido. */
+function startFollowing() {
+  state.following = true;
+  state.voiceSpeaking = false;
+  state.activeVoice = voiceMode();
+  const badge = $('voiceBadge');
+  badge.hidden = state.activeVoice === 'off';
+  badge.classList.remove('live', 'error');
+  $('voiceBadgeText').textContent = state.activeVoice === 'speech' ? 'Escuchando…' : 'Avanza al hablar';
+  level.sensitivity = state.settings.voiceSens / 100;
+
+  if (state.activeVoice === 'speech') {
+    speech = new SpeechFollower({
+      lang: state.settings.voiceLang,
+      onWords: (words) => {
+        $('voiceBadge').classList.add('live');
+        setReadPos(state.matcher.update(words));
+      },
+      onError: (code) => {
+        console.warn('Reconocimiento de voz:', code);
+        if (!state.following) return;
+        // Plan B sin cortar la toma: avanzar mientras hablas.
+        state.activeVoice = 'level';
+        $('voiceBadgeText').textContent = 'Avanza al hablar';
+        level.start(camera.stream);
+        toast(
+          code === 'not-allowed' || code === 'service-not-allowed'
+            ? 'Sin permiso de reconocimiento de voz: el texto avanzará mientras hablas'
+            : 'El reconocimiento de voz no está disponible ahora: el texto avanzará mientras hablas',
+        );
+      },
+    });
+    speech.start();
+  } else if (state.activeVoice === 'level') {
+    level.start(camera.stream);
+  }
+  setScrolling(true);
+}
+
+function stopFollowing() {
+  state.following = false;
+  speech?.stop();
+  speech = null;
+  if (!meterOn) level.stop();
+  setScrolling(false);
+  $('voiceBadge').hidden = true;
+  $('pausedBadge').hidden = true;
+  $('rehearse').textContent = '▶';
+}
+
+function restartVoiceIfActive() {
+  if (!state.following) return;
+  const pos = state.readPos;
+  speech?.stop();
+  speech = null;
+  level.stop();
+  startFollowing();
+  state.matcher.reset(pos);
+}
+
+// Medidor del micrófono en la pestaña «Voz»
+let meterOn = false;
+let meterTimer = 0;
+function startMeter() {
+  if (meterOn || !camera.stream) return;
+  meterOn = true;
+  level.prime();
+  if (!state.following) level.start(camera.stream);
+  meterTimer = setInterval(() => {
+    const bar = $('micMeter').firstElementChild;
+    bar.style.width = `${Math.min(100, Math.sqrt(level.level) * 220)}%`;
+    bar.classList.toggle('on', level.speaking);
+  }, 80);
+}
+function stopMeter() {
+  if (!meterOn) return;
+  meterOn = false;
+  clearInterval(meterTimer);
+  if (!state.following || state.activeVoice !== 'level') level.stop();
+}
 
 $('rehearse').addEventListener('click', () => {
   if (state.recording || state.countingDown) return;
-  if (state.scrolling) return setScrolling(false);
-  if (scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) scroller.scrollTop = 0;
-  setScrolling(true);
+  if (state.following) return stopFollowing();
+  level.prime();
+  if (state.readPos >= state.spans.length) renderPrompterText(state.segments[state.current] ?? '');
+  startFollowing();
+  $('rehearse').textContent = '⏸';
 });
 
 $('prevSeg').addEventListener('click', () => {
   if (state.recording) return;
-  setScrolling(false);
   loadSegment(state.current - 1);
 });
 $('nextSeg').addEventListener('click', () => {
   if (state.recording) return;
-  setScrolling(false);
   loadSegment(state.current + 1);
 });
 
@@ -377,17 +833,17 @@ async function runCountdown(seconds) {
 }
 
 async function startRecording() {
-  if (!state.stream) await startCamera();
-  if (!state.stream) return;
+  if (!camera.stream) await startCamera();
+  if (!camera.stream) return;
   const mime = pickMime();
   if (mime === null) {
     toast('Este navegador no permite grabar vídeo');
     return;
   }
   $('settings').hidden = true;
-  setScrolling(false);
-  scroller.scrollTop = 0;
-  carry = 0;
+  stopMeter();
+  stopFollowing();
+  renderPrompterText(state.segments[state.current] ?? '');
   $('recBtn').classList.add('recording');
 
   if (!(await runCountdown(state.settings.countdown))) {
@@ -395,12 +851,12 @@ async function startRecording() {
     return;
   }
 
-  const bitrate = { 720: 5_000_000, 1080: 10_000_000, 2160: 35_000_000 }[state.settings.quality] ?? 10_000_000;
+  const br = bitrates();
   const chunks = [];
-  const rec = new MediaRecorder(state.stream, {
+  const rec = new MediaRecorder(camera.recordStream(), {
     ...(mime ? { mimeType: mime } : {}),
-    videoBitsPerSecond: bitrate,
-    audioBitsPerSecond: 128_000,
+    videoBitsPerSecond: br.video,
+    audioBitsPerSecond: br.audio,
   });
   const seg = state.current;
   const text = state.segments[seg];
@@ -409,7 +865,7 @@ async function startRecording() {
     const duration = (performance.now() - state.recStart) / 1000;
     const type = rec.mimeType || mime || 'video/webm';
     const blob = new Blob(chunks, { type });
-    const clip = { seg, text, blob, mime: type, duration, createdAt: Date.now() };
+    const clip = { seg, text, blob, mime: type, duration, createdAt: Date.now(), width: br.width, height: br.height };
     try {
       await putClip(clip);
       state.clips.set(seg, clip);
@@ -429,14 +885,13 @@ async function startRecording() {
   timerInterval = setInterval(() => {
     $('recTimer').textContent = fmtTime((performance.now() - state.recStart) / 1000);
   }, 250);
-  setScrolling(true);
+  startFollowing();
 }
 
 function stopRecording() {
   clearTimeout(endTimer);
   clearInterval(timerInterval);
-  setScrolling(false);
-  $('pausedBadge').hidden = true;
+  stopFollowing();
   state.recording = false;
   $('recBtn').classList.remove('recording');
   $('recTimer').hidden = true;
@@ -463,7 +918,10 @@ $('recBtn').addEventListener('click', () => {
     return;
   }
   if (state.recording) stopRecording();
-  else startRecording();
+  else {
+    level.prime(); // el audio debe activarse dentro del toque (iOS)
+    startRecording();
+  }
 });
 
 async function openRecorder(i) {
@@ -478,7 +936,8 @@ async function openRecorder(i) {
 function closeRecorder() {
   if (state.recording) stopRecording();
   state.countingDown = false;
-  setScrolling(false);
+  stopMeter();
+  stopFollowing();
   $('settings').hidden = true;
   // Esperamos un instante para que el último clip termine de escribirse antes de soltar la cámara.
   setTimeout(stopCamera, 300);
@@ -691,6 +1150,7 @@ function toast(msg) {
 // ---------------------------------------------------------------- arranque
 
 async function init() {
+  buildImagePanel();
   applySettings();
   try {
     for (const c of await getClips()) state.clips.set(c.seg, c);

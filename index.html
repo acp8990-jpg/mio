@@ -52,7 +52,7 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
 
   <!-- 2. GRABACIÓN -->
   <main id="view-record" class="view rec" hidden>
-    <video id="preview" playsinline muted autoplay></video>
+    <canvas id="preview" aria-label="Vista previa de la cámara"></canvas>
 
     <div id="prompter" class="prompter">
       <div id="prompterScroll" class="prompter-scroll">
@@ -60,19 +60,23 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
       </div>
       <div class="reading-line" aria-hidden="true"></div>
       <div id="pausedBadge" class="paused-badge" hidden>Pausa · toca para seguir</div>
+      <div id="voiceBadge" class="voice-badge" hidden><span class="dot"></span><span id="voiceBadgeText"></span></div>
     </div>
 
     <div class="rec-top">
       <button id="recBack" class="icon" type="button" aria-label="Volver">‹</button>
+      <button id="orientBtn" class="icon pill" type="button" aria-label="Orientación"></button>
       <div class="rec-info">
         <div id="segLabel" class="seg-label"></div>
         <div id="recTimer" class="rec-timer" hidden>00:00</div>
       </div>
+      <button id="voiceBtn" class="icon pill" type="button" aria-label="Seguir la voz"></button>
       <button id="openSettings" class="icon" type="button" aria-label="Ajustes">⚙</button>
     </div>
 
     <div id="countdown" class="countdown" hidden></div>
     <div id="camError" class="cam-error" hidden></div>
+    <div id="rotateHint" class="rotate-hint" hidden>Gira el móvil para grabar en horizontal con toda la calidad</div>
 
     <div class="rec-bottom">
       <button id="prevSeg" class="icon" type="button" aria-label="Clip anterior">⏮</button>
@@ -84,32 +88,99 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
 
     <section id="settings" class="sheet" hidden>
       <div class="sheet-head">
-        <h2>Teleprompter</h2>
+        <div class="tabs-inline" role="tablist">
+          <button type="button" data-tab="text" class="active">Texto</button>
+          <button type="button" data-tab="voice">Voz</button>
+          <button type="button" data-tab="image">Imagen</button>
+          <button type="button" data-tab="rec">Grabación</button>
+        </div>
         <button id="closeSettings" class="ghost" type="button">Listo</button>
       </div>
-      <label class="slider"><span>Velocidad <b id="speedVal"></b></span>
-        <input id="speed" type="range" min="1" max="30" step="1"></label>
-      <label class="slider"><span>Tamaño de letra <b id="fontVal"></b></span>
-        <input id="fontSize" type="range" min="18" max="80" step="1"></label>
-      <label class="slider"><span>Alto del texto <b id="heightVal"></b></span>
-        <input id="boxHeight" type="range" min="20" max="90" step="1"></label>
-      <label class="slider"><span>Fondo del texto <b id="opacityVal"></b></span>
-        <input id="bgOpacity" type="range" min="0" max="100" step="5"></label>
-      <label class="field"><span>Cuenta atrás</span>
-        <select id="countdownSel">
-          <option value="0">Sin cuenta atrás</option>
-          <option value="3">3 segundos</option>
-          <option value="5">5 segundos</option>
-        </select></label>
-      <label class="field"><span>Calidad</span>
-        <select id="quality">
-          <option value="720">720p</option>
-          <option value="1080">1080p</option>
-          <option value="2160">4K (si la cámara lo permite)</option>
-        </select></label>
-      <label class="check"><input id="mirror" type="checkbox"> Texto en espejo (para cristal de teleprompter)</label>
-      <label class="check"><input id="autoAdvance" type="checkbox"> Pasar al siguiente clip al parar</label>
-      <label class="check"><input id="autoStop" type="checkbox"> Parar la grabación al acabar el texto</label>
+
+      <div class="tab-panel" data-panel="text">
+        <label class="slider"><span>Velocidad <b id="speedVal"></b></span>
+          <input id="speed" type="range" min="1" max="30" step="1"></label>
+        <label class="slider"><span>Tamaño de letra <b id="fontVal"></b></span>
+          <input id="fontSize" type="range" min="18" max="80" step="1"></label>
+        <label class="slider"><span>Alto del texto <b id="heightVal"></b></span>
+          <input id="boxHeight" type="range" min="20" max="90" step="1"></label>
+        <label class="slider"><span>Fondo del texto <b id="opacityVal"></b></span>
+          <input id="bgOpacity" type="range" min="0" max="100" step="5"></label>
+        <label class="field"><span>Cuenta atrás</span>
+          <select id="countdownSel">
+            <option value="0">Sin cuenta atrás</option>
+            <option value="3">3 segundos</option>
+            <option value="5">5 segundos</option>
+          </select></label>
+        <label class="check"><input id="mirror" type="checkbox"> Texto en espejo (para cristal de teleprompter)</label>
+        <label class="check"><input id="autoAdvance" type="checkbox"> Pasar al siguiente clip al parar</label>
+        <label class="check"><input id="autoStop" type="checkbox"> Parar la grabación al acabar el texto</label>
+      </div>
+
+      <div class="tab-panel" data-panel="voice" hidden>
+        <label class="field"><span>El texto avanza…</span>
+          <select id="voiceMode">
+            <option value="speech">Siguiendo mis palabras (reconocimiento de voz)</option>
+            <option value="level">Mientras hablo (se para en los silencios)</option>
+            <option value="off">A velocidad fija</option>
+          </select></label>
+        <p id="voiceHelp" class="muted"></p>
+        <label class="field" id="voiceLangField"><span>Idioma del guion</span>
+          <select id="voiceLang">
+            <option value="es-ES">Español (España)</option>
+            <option value="es-MX">Español (México)</option>
+            <option value="es-US">Español (EE. UU.)</option>
+            <option value="es-AR">Español (Argentina)</option>
+            <option value="es-CO">Español (Colombia)</option>
+            <option value="en-US">English (US)</option>
+            <option value="en-GB">English (UK)</option>
+            <option value="pt-BR">Português (Brasil)</option>
+            <option value="fr-FR">Français</option>
+            <option value="it-IT">Italiano</option>
+            <option value="de-DE">Deutsch</option>
+          </select></label>
+        <label class="slider" id="sensField"><span>Sensibilidad del micrófono <b id="sensVal"></b></span>
+          <input id="voiceSens" type="range" min="0" max="100" step="5"></label>
+        <div class="meter" id="micMeter"><div></div></div>
+      </div>
+
+      <div class="tab-panel" data-panel="image" hidden>
+        <div class="chips" id="presets"></div>
+        <div id="adjustSliders"></div>
+        <button id="resetAdjust" class="ghost" type="button">Restablecer imagen</button>
+        <h3 class="sub">Cámara</h3>
+        <div id="hwControls"><p class="muted">Abre la cámara para ver sus controles.</p></div>
+      </div>
+
+      <div class="tab-panel" data-panel="rec" hidden>
+        <div class="field"><span>Formato</span>
+          <div class="seg-toggle" id="orientToggle">
+            <button type="button" data-orient="vertical"><span class="ar v"></span> Vertical 9:16</button>
+            <button type="button" data-orient="horizontal"><span class="ar h"></span> Horizontal 16:9</button>
+          </div></div>
+        <label class="field"><span>Resolución de grabación</span>
+          <select id="quality">
+            <option value="720">720p (HD)</option>
+            <option value="1080">1080p (Full HD)</option>
+            <option value="2160">4K (si el móvil puede)</option>
+          </select></label>
+        <label class="field"><span>Fotogramas por segundo</span>
+          <select id="fps">
+            <option value="30">30 fps</option>
+            <option value="60">60 fps (más fluido)</option>
+          </select></label>
+        <label class="field"><span>Calidad de compresión</span>
+          <select id="bitrateLevel">
+            <option value="standard">Estándar (archivos pequeños)</option>
+            <option value="high">Alta</option>
+            <option value="max">Máxima (archivos grandes)</option>
+          </select></label>
+        <h3 class="sub">Sonido</h3>
+        <label class="check"><input id="noiseSuppression" type="checkbox"> Reducir ruido de fondo</label>
+        <label class="check"><input id="echoCancellation" type="checkbox"> Cancelar eco</label>
+        <label class="check"><input id="autoGainControl" type="checkbox"> Volumen automático</label>
+        <p id="recInfo" class="muted"></p>
+      </div>
     </section>
   </main>
 

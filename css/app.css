@@ -92,7 +92,7 @@ textarea#script:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   position: fixed; inset: 0; max-width: none; padding: 0; background: #000; overflow: hidden;
   touch-action: manipulation;
 }
-#preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#preview { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 #preview.mirror { transform: scaleX(-1); }
 
 .prompter {
@@ -112,6 +112,7 @@ textarea#script:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 }
 .prompter-scroll::-webkit-scrollbar { display: none; }
 .prompter-text {
+  position: relative;
   padding: calc(var(--box-h) * .3) 18px calc(var(--box-h) * .75);
   font-size: var(--font); line-height: 1.35; font-weight: 600;
   white-space: pre-wrap; overflow-wrap: anywhere;
@@ -205,3 +206,61 @@ button.icon {
   background: #fff; color: #111; padding: 10px 16px; border-radius: 999px; font-size: .95rem;
   box-shadow: 0 6px 24px rgba(0, 0, 0, .4);
 }
+
+/* ---------- lectura palabra a palabra ---------- */
+.prompter-text .w { transition: opacity .25s, color .25s; }
+.prompter-text .w.read { opacity: .4; }
+.prompter-text .w.cur { color: var(--accent-2); }
+.voice-badge {
+  position: absolute; right: 8px; top: 8px; display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,.7); font-size: .8rem; padding: 4px 10px; border-radius: 999px; pointer-events: none;
+}
+.voice-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.voice-badge.live .dot { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+
+button.icon.pill { width: auto; padding: 0 12px; font-size: .85rem; white-space: nowrap; }
+button.icon.pill.on { background: rgba(46, 230, 197, .25); }
+.rec-top .rec-info { flex: 1; min-width: 0; }
+.seg-label { font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.rotate-hint {
+  position: absolute; z-index: 3; left: 50%; bottom: calc(120px + var(--safe-bottom)); transform: translateX(-50%);
+  background: rgba(0,0,0,.75); padding: 8px 14px; border-radius: 999px; font-size: .85rem; white-space: nowrap;
+}
+
+/* ---------- panel de ajustes con pestañas ---------- */
+.sheet { max-height: 70vh; }
+.sheet.compact { max-height: 46vh; }
+.sheet-head { gap: 10px; position: sticky; top: -16px; background: var(--surface); padding: 4px 0 8px; z-index: 1; }
+.tabs-inline { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.tabs-inline button { padding: 8px 12px; font-size: .9rem; background: transparent; color: var(--muted); white-space: nowrap; }
+.tabs-inline button.active { background: var(--surface-2); color: var(--text); }
+.tab-panel { display: grid; gap: 14px; }
+.sub { margin: 8px 0 0; font-size: .95rem; color: var(--muted); }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.chips button { padding: 8px 14px; font-size: .9rem; white-space: nowrap; }
+.chips button.active { background: var(--accent); color: #fff; }
+#adjustSliders { display: grid; gap: 12px; }
+.seg-toggle { display: flex; gap: 6px; }
+.seg-toggle button { flex: 1; padding: 12px 8px; font-size: .95rem; }
+.seg-toggle button.active { background: var(--accent); color: #fff; }
+.meter { height: 10px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.meter div { height: 100%; width: 0; background: var(--muted); transition: width .08s; }
+.meter div.on { background: var(--accent-2); }
+
+/* Pantalla apaisada: texto más ancho y menos alto. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .prompter { left: 15%; right: 15%; top: calc(56px + var(--safe-top)); }
+  .rec-bottom { padding-bottom: calc(10px + var(--safe-bottom)); }
+  .rec-btn { width: 64px; height: 64px; }
+  .rec-btn span { width: 46px; height: 46px; }
+  .sheet, .sheet.compact { max-height: 80vh; left: auto; width: min(420px, 60vw); border-radius: 20px 0 0 0; }
+}
+
+.ar { display: inline-block; border: 2px solid currentColor; border-radius: 3px; vertical-align: -2px; margin-right: 4px; }
+.ar.v { width: 10px; height: 16px; }
+.ar.h { width: 16px; height: 10px; vertical-align: 0; }
+.sheet { overflow-x: hidden; }
+.sheet > *, .tab-panel > *, #adjustSliders > * { min-width: 0; }
+.sheet-head .tabs-inline { flex: 1; min-width: 0; }
+.sheet-head #closeSettings { flex: none; }

@@ -242,8 +242,8 @@ async function pickVideoCodec(width, height, bitrate) {
 async function reencodeJoin(clips, resolution, onProgress) {
   const first = clips[0];
   const { width, height } = targetSize(first.video.displayWidth, first.video.displayHeight, resolution);
-  // ≈0,1 bits por píxel a 30 fps: ~6 Mbps en 1080p, ~25 Mbps en 4K.
-  const bitrate = Math.round(width * height * 30 * 0.1);
+  // ≈0,15 bits por píxel a 30 fps: ~9 Mbps en 1080p, ~37 Mbps en 4K.
+  const bitrate = Math.round(width * height * 30 * 0.15);
   const vCodec = await pickVideoCodec(width, height, bitrate);
   const audioClips = clips.filter((c) => c.audio);
   let aCodec = null;
