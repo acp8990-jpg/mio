@@ -160,8 +160,21 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
       </div>
 
       <div class="tab-panel" data-panel="image" hidden>
-        <label class="slider"><span>Desenfoque de fondo <b id="bgBlurVal"></b></span>
+        <div class="field"><span>Fondo</span>
+          <div class="seg-toggle four" id="bgModeToggle">
+            <button type="button" data-bg="none">Original</button>
+            <button type="button" data-bg="blur">Desenfocado</button>
+            <button type="button" data-bg="color">Color</button>
+            <button type="button" data-bg="image">Imagen</button>
+          </div></div>
+        <label class="slider" id="bgBlurField"><span>Desenfoque de fondo <b id="bgBlurVal"></b></span>
           <input id="bgBlur" type="range" min="0" max="100" step="1"></label>
+        <div class="row wrap" id="bgColorField"><label class="color"><input id="bgColor" type="color"> Color del fondo</label></div>
+        <div class="row wrap" id="bgImageField">
+          <button id="bgImagePick" class="ghost" type="button">Elegir imagen de fondo…</button>
+          <input id="bgImageFile" type="file" accept="image/*" hidden>
+          <span id="bgImageName" class="muted"></span>
+        </div>
         <p id="bgBlurStatus" class="muted small"></p>
         <div class="field"><span>Enfoque</span>
           <div class="seg-toggle" id="focusToggle">

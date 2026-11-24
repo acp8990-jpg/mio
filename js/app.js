@@ -1,5 +1,5 @@
 import {
-  listProjects, getProject, putProject, deleteProject, takesFor, putTake, deleteTake, uid,
+  listProjects, getProject, putProject, deleteProject, takesFor, putTake, deleteTake, uid, getAsset, putAsset,
   loadJSON, saveJSON, loadText, requestPersistence,
 } from './storage.js';
 import { createEditor } from './editor.js';
@@ -30,6 +30,8 @@ const DEFAULTS = {
   adjust: {},
   preset: 'natural',
   bgBlur: 0,
+  bgMode: null, // none | blur | color | image
+  bgColor: '#1f2a44',
   boxPos: {}, // posición del texto por orientación de pantalla: { portrait: {x,y,w}, landscape: {...} } en %
   projectId: null,
   mirror: false,
@@ -483,7 +485,39 @@ function buildImagePanel() {
   blur.value = String(Math.round(state.settings.bgBlur * 100));
   blur.addEventListener('input', () => {
     setSetting('bgBlur', Number(blur.value) / 100);
-    applyBackgroundBlur();
+    applyBackground();
+  });
+  document.querySelectorAll('#bgModeToggle button').forEach((b) =>
+    b.addEventListener('click', () => {
+      const mode = b.dataset.bg;
+      if (mode === 'blur' && !state.settings.bgBlur) setSetting('bgBlur', 0.6);
+      setSetting('bgMode', mode);
+      syncImagePanel();
+      applyBackground();
+      if (mode === 'image' && !state.bgImage) $('bgImageFile').click();
+    }),
+  );
+  $('bgColor').value = state.settings.bgColor;
+  $('bgColor').addEventListener('input', (e) => {
+    setSetting('bgColor', e.target.value);
+    applyBackground();
+  });
+  $('bgImagePick').addEventListener('click', () => $('bgImageFile').click());
+  $('bgImageFile').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      await putAsset({ id: 'bg-image', projectId: '__settings__', kind: 'background', name: file.name, blob: file });
+      state.bgImage = await createImageBitmap(file);
+      state.bgImageName = file.name;
+      setSetting('bgMode', 'image');
+      syncImagePanel();
+      applyBackground();
+    } catch (err) {
+      console.error(err);
+      toast('No se pudo usar esa imagen');
+    }
   });
   document.querySelectorAll('#focusToggle button').forEach((b) =>
     b.addEventListener('click', () => (b.dataset.focus === 'lock' ? lockFocus() : unlockFocus())),
@@ -509,34 +543,49 @@ function syncImagePanel() {
   const bb = Math.round(state.settings.bgBlur * 100);
   $('bgBlur').value = String(bb);
   $('bgBlurVal').textContent = bb ? String(bb) : 'No';
+  const mode = state.settings.bgMode || 'none';
+  document.querySelectorAll('#bgModeToggle button').forEach((b) => b.classList.toggle('active', b.dataset.bg === mode));
+  $('bgBlurField').hidden = mode !== 'blur';
+  $('bgColorField').hidden = mode !== 'color';
+  $('bgImageField').hidden = mode !== 'image';
+  $('bgImageName').textContent = state.bgImage ? state.bgImageName || 'Imagen elegida' : 'Ninguna imagen';
 }
 
 // ---------------------------------------------------------------- fondo desenfocado
 
-let blurLoadToken = 0;
-async function applyBackgroundBlur() {
-  const amount = state.settings.bgBlur;
-  $('bgBlurVal').textContent = amount ? String(Math.round(amount * 100)) : 'No';
+let bgLoadToken = 0;
+/** Aplica el fondo elegido (original, desenfocado, color o imagen) a la cámara. */
+async function applyBackground() {
+  const s = state.settings;
+  const mode = s.bgMode || 'none';
+  const cfg = { mode, blur: s.bgBlur, color: s.bgColor, image: state.bgImage };
   const status = $('bgBlurStatus');
-  if (!camera.grader.usesGpu) {
-    status.textContent = 'Este dispositivo no admite el desenfoque de fondo (necesita WebGL).';
+  const okText = {
+    blur: 'Fondo desenfocado: detecta a la persona y difumina el resto.',
+    color: 'Fondo de color: detecta a la persona y cambia todo lo demás.',
+    image: state.bgImage ? 'Fondo con imagen: detecta a la persona y pone la imagen detrás.' : 'Elige una imagen de fondo.',
+    none: '',
+  };
+  if (mode !== 'none' && !camera.grader.usesGpu) {
+    status.textContent = 'Este dispositivo no admite cambiar el fondo (necesita WebGL).';
     return;
   }
-  if (amount > 0 && !camera.mask.ready) {
-    const token = ++blurLoadToken;
-    status.textContent = 'Preparando el desenfoque (solo la primera vez, ~15 MB)…';
+  const needsModel = mode !== 'none' && !(mode === 'blur' && !s.bgBlur) && !camera.mask.ready;
+  if (needsModel) {
+    const token = ++bgLoadToken;
+    status.textContent = 'Preparando la detección de la persona (solo la primera vez, ~15 MB)…';
     try {
-      await camera.setBackgroundBlur(amount);
-      if (token === blurLoadToken) status.textContent = 'Fondo desenfocado: detecta a la persona y difumina el resto.';
+      await camera.setBackground(cfg);
+      if (token === bgLoadToken) status.textContent = okText[mode];
     } catch (err) {
       console.error(err);
-      status.textContent = 'No se pudo activar el desenfoque de fondo en este dispositivo.';
-      camera.bgBlur = 0;
+      status.textContent = 'No se pudo activar el cambio de fondo en este dispositivo.';
+      camera.bg.mode = 'none';
     }
     return;
   }
-  camera.setBackgroundBlur(amount);
-  status.textContent = amount > 0 ? 'Fondo desenfocado: detecta a la persona y difumina el resto.' : '';
+  camera.setBackground(cfg);
+  status.textContent = okText[mode];
 }
 
 // ---------------------------------------------------------------- enfoque
@@ -761,7 +810,7 @@ async function startCamera() {
     renderHardware();
     state.focusLocked = false;
     syncFocusUi();
-    if (s.bgBlur > 0) applyBackgroundBlur();
+    if ((s.bgMode || 'none') !== 'none') applyBackground();
   } catch (err) {
     console.error(err);
     const el = $('camError');
@@ -1377,6 +1426,16 @@ function toast(msg) {
 // ---------------------------------------------------------------- arranque
 
 async function init() {
+  if (state.settings.bgMode == null) state.settings.bgMode = state.settings.bgBlur > 0 ? 'blur' : 'none';
+  try {
+    const bgAsset = await getAsset('bg-image');
+    if (bgAsset?.blob) {
+      state.bgImage = await createImageBitmap(bgAsset.blob);
+      state.bgImageName = bgAsset.name;
+    }
+  } catch {
+    /* sin imagen de fondo */
+  }
   buildImagePanel();
   applySettings();
   try {

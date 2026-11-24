@@ -59,7 +59,11 @@ uniform float uExposure, uBrightness, uContrast, uSaturation, uVibrance;
 uniform float uTemp, uTint, uHigh, uShadow, uSharp, uSmooth, uVignette;
 uniform sampler2D uBlurTex;
 uniform sampler2D uMask;
+uniform sampler2D uBgImage;
 uniform float uBg;
+uniform float uBgMode; // 1 desenfoque, 2 color, 3 imagen
+uniform vec3 uBgColor;
+uniform vec4 uBgCrop;
 
 vec3 px(vec2 o) { return texture2D(uTex, vUv + o * uTexel).rgb; }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -84,9 +88,13 @@ void main() {
   }
 
   if (uBg > 0.0) {
-    // Fondo desenfocado detrás de la persona (máscara de MediaPipe, bordes suavizados).
+    // Fondo sustituido detrás de la persona (máscara de MediaPipe, bordes suavizados).
     float m = smoothstep(0.3, 0.75, texture2D(uMask, vUv).r);
-    c = mix(texture2D(uBlurTex, vUv).rgb, c, m);
+    vec3 bg;
+    if (uBgMode < 1.5) bg = texture2D(uBlurTex, vUv).rgb;
+    else if (uBgMode < 2.5) bg = uBgColor;
+    else bg = texture2D(uBgImage, uBgCrop.xy + vOut * uBgCrop.zw).rgb;
+    c = mix(bg, c, m);
   }
 
   c *= exp2(uExposure);
@@ -209,15 +217,34 @@ export class Grader {
     gl.useProgram(this.main.prog);
     this.u = {};
     for (const n of ['uCrop', 'uTexel', 'uExposure', 'uBrightness', 'uContrast', 'uSaturation', 'uVibrance',
-      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette', 'uBg', 'uTex', 'uBlurTex', 'uMask']) {
+      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette', 'uBg', 'uTex', 'uBlurTex', 'uMask', 'uBgImage', 'uBgMode', 'uBgColor', 'uBgCrop']) {
       this.u[n] = gl.getUniformLocation(this.main.prog, n);
     }
     gl.uniform1i(this.u.uTex, 0);
     gl.uniform1i(this.u.uBlurTex, 1);
     gl.uniform1i(this.u.uMask, 2);
+    gl.uniform1i(this.u.uBgImage, 3);
+    this.bgImageTex = this.#texture();
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0]));
+    this.bgImage = null;
+    this.bgImageSize = [1, 1];
     gl.useProgram(this.blur.prog);
     this.ub = { uTex: gl.getUniformLocation(this.blur.prog, 'uTex'), uDir: gl.getUniformLocation(this.blur.prog, 'uDir') };
     gl.uniform1i(this.ub.uTex, 0);
+  }
+
+  /** Imagen de fondo (ImageBitmap) para el modo «imagen». */
+  setBackgroundImage(img) {
+    if (!this.gl || this.bgImage === img) return;
+    const gl = this.gl;
+    this.bgImage = img;
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.bgImageTex);
+    if (img) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      this.bgImageSize = [img.width, img.height];
+    }
+    gl.activeTexture(gl.TEXTURE0);
   }
 
   #texture() {
@@ -293,9 +320,9 @@ export class Grader {
   /** Dibuja un fotograma de `source` (vídeo de la cámara) en el canvas de salida. */
   /**
    * @param {{data:Uint8Array,width:number,height:number,version:number}|null} mask máscara de persona
-   * @param {number} bgBlur intensidad del desenfoque de fondo (0..1)
+   * @param {{mode:'none'|'blur'|'color'|'image', blur:number, color:number[]}} bg fondo
    */
-  draw(source, srcW, srcH, mask = null, bgBlur = 0) {
+  draw(source, srcW, srcH, mask = null, bg = null) {
     const { canvas } = this;
     const W = canvas.width;
     const H = canvas.height;
@@ -321,7 +348,8 @@ export class Grader {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
 
-    const useBg = bgBlur > 0 && mask?.data;
+    const mode = bg?.mode ?? 'none';
+    const useBg = mode !== 'none' && (mode !== 'blur' || bg.blur > 0) && mask?.data;
     let blurTex = null;
     if (useBg) {
       if (mask.version !== this.maskVersion) {
@@ -331,7 +359,7 @@ export class Grader {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, mask.width, mask.height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, mask.data);
         this.maskVersion = mask.version;
       }
-      blurTex = this.#blurBackground(srcW, srcH, bgBlur);
+      if (mode === 'blur') blurTex = this.#blurBackground(srcW, srcH, bg.blur);
     }
 
     gl.useProgram(this.main.prog);
@@ -341,9 +369,18 @@ export class Grader {
     gl.bindTexture(gl.TEXTURE_2D, blurTex ?? this.tex);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.bgImageTex);
     gl.activeTexture(gl.TEXTURE0);
     const u = this.u;
     gl.uniform1f(u.uBg, useBg ? 1 : 0);
+    if (useBg) {
+      gl.uniform1f(u.uBgMode, { blur: 1, color: 2, image: 3 }[mode]);
+      const col = bg.color || [0, 0, 0];
+      gl.uniform3f(u.uBgColor, col[0], col[1], col[2]);
+      const [ix, iy, iw, ih] = coverCrop(this.bgImageSize[0], this.bgImageSize[1], W, H);
+      gl.uniform4f(u.uBgCrop, ix, iy, iw, ih);
+    }
     gl.uniform4f(u.uCrop, cx, cy, cw, ch);
     gl.uniform2f(u.uTexel, 1 / srcW, 1 / srcH);
     gl.uniform1f(u.uExposure, a.exposure);

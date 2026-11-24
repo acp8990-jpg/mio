@@ -33,13 +33,24 @@ export class Camera {
     this.running = false;
     this.frameCount = 0;
     this.mask = new PersonMask();
-    this.bgBlur = 0;
+    this.bg = { mode: 'none', blur: 0, color: [0.1, 0.1, 0.12] };
   }
 
-  /** Desenfoque de fondo 0..1. La primera vez descarga el modelo de segmentación. */
-  async setBackgroundBlur(amount) {
-    this.bgBlur = amount;
-    if (amount > 0 && !this.mask.ready) await this.mask.enable();
+  get bgActive() {
+    return this.bg.mode !== 'none' && (this.bg.mode !== 'blur' || this.bg.blur > 0);
+  }
+
+  /**
+   * Fondo: { mode: 'none'|'blur'|'color'|'image', blur: 0..1, color: '#rrggbb', image: ImageBitmap|null }.
+   * La primera vez descarga el modelo de segmentación.
+   */
+  async setBackground({ mode, blur, color, image }) {
+    const hex = /^#?([0-9a-f]{6})$/i.exec(color || '');
+    const n = hex ? parseInt(hex[1], 16) : 0x1a1a1f;
+    this.bg = { mode, blur, color: [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255] };
+    this.grader.setBackgroundImage(mode === 'image' ? image : null);
+    if (mode === 'image' && !image) this.bg.mode = 'none';
+    if (this.bgActive && !this.mask.ready) await this.mask.enable();
   }
 
   get videoTrack() {
@@ -89,9 +100,9 @@ export class Camera {
     const draw = () => {
       if (!this.running) return;
       if (v.readyState >= 2 && v.videoWidth) {
-        const blur = this.bgBlur > 0 && this.mask.ready;
-        if (blur) this.mask.process(v);
-        this.grader.draw(v, v.videoWidth, v.videoHeight, blur ? this.mask : null, this.bgBlur);
+        const bg = this.bgActive && this.mask.ready;
+        if (bg) this.mask.process(v);
+        this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
       }
       schedule();
