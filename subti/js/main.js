@@ -3,6 +3,7 @@ import {
 } from './captions.js';
 import { extractAudio, transcribe, cancelTranscription } from './transcribe.js';
 import { probe, exportVideo, thumbnail } from './render.js';
+import { initRecorder, openScript, alignToScript, scriptTiming } from './record.js';
 import { saveProject, getProject, deleteProject, listProjects, prefs, setPrefs } from './db.js';
 import {
   isPro, proStatus, startTrial, trialUsed, markTrialUsed, PRICES, FREE, LEMON, paymentsReady, checkoutUrl,
@@ -109,7 +110,7 @@ for (const sh of $$('.sheet')) {
 }
 
 function show(screen) {
-  for (const s of ['#home', '#processing', '#editor']) $(s).hidden = s !== screen;
+  for (const s of ['#home', '#processing', '#editor', '#script', '#rec']) $(s).hidden = s !== screen;
   if (screen !== '#home') stopDemo();
   else startDemo();
 }
@@ -448,7 +449,7 @@ $('#setupGo').addEventListener('click', () => {
 // ================================================================ transcribir
 
 let cancelled = false;
-async function startTranscription({ file, info, thumb }) {
+async function startTranscription({ file, info, thumb, script = '', language = null, segs = null }) {
   cancelled = false;
   show('#processing');
   $('#procBg').style.backgroundImage = thumb ? `url(${URL.createObjectURL(thumb)})` : '';
@@ -473,7 +474,7 @@ async function startTranscription({ file, info, thumb }) {
       setProc('Preparando la IA…', 'Cargando el modelo de voz');
       setRing(0, true);
       words = await transcribe(audio, {
-        language: prefs('lang', 'es'),
+        language: language || prefs('lang', 'es'),
         quality: isPro() ? prefs('quality', 'fast') : 'fast',
         onEvent: (e) => {
           if (cancelled) return;
@@ -498,12 +499,20 @@ async function startTranscription({ file, info, thumb }) {
     } catch (err) {
       if (cancelled) return;
       console.error(err);
-      toast('No he podido transcribir. Revisa tu conexión la primera vez y vuelve a intentarlo.', 4500);
-      show('#home');
-      return;
+      if (!segs) {
+        toast('No he podido transcribir. Revisa tu conexión la primera vez y vuelve a intentarlo.', 4500);
+        show('#home');
+        return;
+      }
+      // Grabado con teleprompter: no se pierde nada, los subtítulos salen del guion con tiempos aproximados.
+      words = scriptTiming(segs);
+      toast('Sin conexión para la IA: he puesto los subtítulos con tu guion. Revisa los tiempos en «Texto».', 5000);
     }
   }
   if (cancelled) return;
+  // Grabado con teleprompter: se usa la escritura exacta del guion (ortografía, tildes y puntuación).
+  if (script && words.length && !words.fromScript) words = alignToScript(words, script);
+  if (!audio && segs) words = scriptTiming(segs);
   if (audio && !words.length) toast('No he oído voz en el vídeo: puedes escribir los subtítulos a mano.', 4000);
   setRing(1, false);
   const project = {
@@ -1250,6 +1259,54 @@ $('#saveBtn').addEventListener('click', () => {
   if (!lastExport) return;
   download(lastExport.blob, exportName());
   toast('Vídeo guardado en Descargas');
+});
+
+// ================================================================ grabar con teleprompter
+
+$('#recCta').addEventListener('click', () => {
+  haptic();
+  openScript();
+});
+
+initRecorder({
+  show,
+  toast,
+  openSheet,
+  closeSheet,
+  onDone: async ({ blobs, script, lang, segs }) => {
+    cancelled = false;
+    show('#processing');
+    $('#procBg').style.backgroundImage = '';
+    $('#ticker').replaceChildren();
+    setProc('Uniendo tus tomas…', blobs.length > 1 ? `${blobs.length} tomas` : 'Preparando el vídeo');
+    setRing(0, false);
+    let file;
+    try {
+      const { joinClips } = await import('../../js/export.js');
+      const res = blobs.length === 1 && blobs[0].type === 'video/mp4'
+        ? { blob: blobs[0] }
+        : await joinClips(blobs, { onProgress: (p) => setRing(p, false) });
+      const stamp = new Date().toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      file = new File([res.blob], `Grabación ${stamp}.mp4`, { type: 'video/mp4' });
+    } catch (err) {
+      console.error(err);
+      toast('No se pudieron unir las tomas. Vuelve a intentarlo.', 4000);
+      show('#rec');
+      return;
+    }
+    if (cancelled) return;
+    let info;
+    try {
+      info = await probe(file);
+    } catch (err) {
+      console.error(err);
+      toast('La grabación no se pudo leer en este navegador.', 4000);
+      show('#home');
+      return;
+    }
+    const thumb = await thumbnail(file, Math.min(1, info.duration / 2)).catch(() => null);
+    startTranscription({ file, info, thumb, script, language: lang, segs });
+  },
 });
 
 // ================================================================ arranque
