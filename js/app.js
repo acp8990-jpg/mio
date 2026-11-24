@@ -1,13 +1,13 @@
 import {
-  putClip, getClips, deleteClip, clearClips,
-  loadJSON, saveJSON, loadText, saveText, requestPersistence,
+  listProjects, getProject, putProject, deleteProject, takesFor, putTake, deleteTake, uid, getAsset, putAsset,
+  loadJSON, saveJSON, loadText, requestPersistence,
 } from './storage.js';
+import { createEditor } from './editor.js';
 import { Camera, outputSize } from './camera.js';
 import { ADJUST_DEFAULTS, PRESETS } from './grade.js';
 import { tokenize, ScriptMatcher, SpeechFollower, LevelFollower, speechSupported } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
-const SCRIPT_KEY = 'teleclip.script';
 const SETTINGS_KEY = 'teleclip.settings';
 
 const DEFAULTS = {
@@ -29,7 +29,11 @@ const DEFAULTS = {
   voiceSens: 50,
   adjust: {},
   preset: 'natural',
-  exportRes: 1080,
+  bgBlur: 0,
+  bgMode: null, // none | blur | color | image
+  bgColor: '#1f2a44',
+  boxPos: {}, // posición del texto por orientación de pantalla: { portrait: {x,y,w}, landscape: {...} } en %
+  projectId: null,
   mirror: false,
   autoAdvance: true,
   autoStop: false,
@@ -39,7 +43,8 @@ const DEFAULTS = {
 const state = {
   settings: loadJSON(SETTINGS_KEY, DEFAULTS),
   segments: [],
-  clips: new Map(), // seg -> clip
+  project: null,
+  takes: new Map(), // seg -> [tomas] (de más antigua a más reciente)
   current: 0,
   recorder: null,
   words: [],
@@ -54,10 +59,14 @@ const state = {
   scrolling: false,
   countingDown: false,
   wakeLock: null,
-  exportUrl: null,
-  exportFile: null,
-  clipUrls: [],
 };
+
+const hasTake = (seg) => (state.takes.get(seg) || []).length > 0;
+function currentTake(seg) {
+  const list = state.takes.get(seg) || [];
+  const id = state.project?.clips?.[seg]?.take;
+  return list.find((t) => t.id === id) || list[list.length - 1] || null;
+}
 
 // ---------------------------------------------------------------- guion
 
@@ -85,7 +94,7 @@ const scriptEl = $('script');
 let saveTimer = 0;
 
 function updateSegments() {
-  state.segments = splitScript(scriptEl.value, state.settings.splitMode);
+  state.segments = splitScript(scriptEl.value, state.project?.splitMode || 'paragraphs');
   const chars = scriptEl.value.length;
   const words = scriptEl.value.trim() ? scriptEl.value.trim().split(/\s+/).length : 0;
   $('charCount').textContent = `${chars.toLocaleString('es')} caracteres · ${words.toLocaleString('es')} palabras`;
@@ -106,27 +115,28 @@ function renderSegPreview() {
     body.className = 'seg-text';
     body.textContent = text;
     const st = document.createElement('span');
-    const clip = state.clips.get(i);
-    st.className = 'seg-state' + (clip ? ' done' : '');
-    st.textContent = clip ? `✓ ${fmtTime(clip.duration)}` : '—';
+    const take = currentTake(i);
+    const n = (state.takes.get(i) || []).length;
+    st.className = 'seg-state' + (take ? ' done' : '');
+    st.textContent = take ? `✓ ${fmtTime(take.duration)}${n > 1 ? ` · ${n} tomas` : ''}` : '—';
     li.append(num, body, st);
     li.addEventListener('click', () => openRecorder(i));
     list.append(li);
   });
 }
 
-scriptEl.value = loadText(SCRIPT_KEY);
 scriptEl.addEventListener('input', () => {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    if (!saveText(SCRIPT_KEY, scriptEl.value)) toast('No se pudo guardar el guion en este dispositivo');
+    state.project.script = scriptEl.value;
+    saveProject();
     updateSegments();
   }, 250);
 });
 
-$('splitMode').value = state.settings.splitMode;
 $('splitMode').addEventListener('change', (e) => {
-  setSetting('splitMode', e.target.value);
+  state.project.splitMode = e.target.value;
+  saveProject();
   updateSegments();
 });
 
@@ -135,15 +145,110 @@ $('importFile').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   scriptEl.value = await file.text();
-  saveText(SCRIPT_KEY, scriptEl.value);
+  state.project.script = scriptEl.value;
+  saveProject();
   updateSegments();
   e.target.value = '';
   toast(`Guion importado: ${file.name}`);
 });
 
 $('goRecord').addEventListener('click', () => {
-  const firstMissing = state.segments.findIndex((_, i) => !state.clips.has(i));
+  const firstMissing = state.segments.findIndex((_, i) => !hasTake(i));
   openRecorder(firstMissing === -1 ? 0 : firstMissing);
+});
+
+// ---------------------------------------------------------------- proyectos
+
+let projectSaveTimer = 0;
+function saveProject() {
+  clearTimeout(projectSaveTimer);
+  const p = state.project;
+  projectSaveTimer = setTimeout(() => putProject(p).catch((err) => {
+    console.error(err);
+    toast('No se pudo guardar el proyecto');
+  }), 150);
+}
+
+function newProjectData(name, script = '') {
+  const now = Date.now();
+  return { id: uid(), name, createdAt: now, updatedAt: now, script, splitMode: 'paragraphs', clips: {}, edit: {}, order: null };
+}
+
+async function loadProject(id) {
+  let p = id ? await getProject(id) : null;
+  if (!p) {
+    const all = await listProjects();
+    p = all.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  }
+  if (!p) {
+    // Primer uso: proyecto nuevo con el guion que hubiera de versiones anteriores.
+    p = newProjectData('Mi primer vídeo', loadText('teleclip.script'));
+    await putProject(p);
+  }
+  p.clips ??= {};
+  state.project = p;
+  setSetting('projectId', p.id);
+  scriptEl.value = p.script || '';
+  $('splitMode').value = p.splitMode || 'paragraphs';
+  state.takes = new Map();
+  for (const t of (await takesFor(p.id)).sort((a, b) => a.createdAt - b.createdAt)) {
+    if (!state.takes.has(t.seg)) state.takes.set(t.seg, []);
+    state.takes.get(t.seg).push(t);
+  }
+  updateBadge();
+  updateSegments();
+  await renderProjectSelect();
+  editor.refresh();
+}
+
+async function renderProjectSelect() {
+  const sel = $('projectSel');
+  sel.replaceChildren();
+  const all = (await listProjects()).sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const p of all) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.id === state.project.id ? state.project.name : p.name;
+    sel.append(o);
+  }
+  sel.value = state.project.id;
+}
+
+$('projectSel').addEventListener('change', (e) => loadProject(e.target.value));
+$('projectMenu').addEventListener('click', () => ($('projectActions').hidden = !$('projectActions').hidden));
+$('projectNew').addEventListener('click', async () => {
+  const name = prompt('Nombre del nuevo vídeo', `Vídeo ${new Date().toLocaleDateString('es')}`);
+  if (name == null) return;
+  const p = newProjectData(name.trim() || 'Vídeo sin título');
+  await putProject(p);
+  $('projectActions').hidden = true;
+  await loadProject(p.id);
+  scriptEl.focus();
+});
+$('projectRename').addEventListener('click', async () => {
+  const name = prompt('Nuevo nombre', state.project.name);
+  if (!name?.trim()) return;
+  state.project.name = name.trim();
+  await putProject(state.project);
+  await renderProjectSelect();
+});
+$('projectDup').addEventListener('click', async () => {
+  const p = newProjectData(`${state.project.name} (copia)`, state.project.script);
+  p.splitMode = state.project.splitMode;
+  p.edit = structuredClone(state.project.edit || {});
+  delete p.edit.music;
+  if (p.edit.logo) p.edit.logo.assetId = null;
+  p.edit.overlays = (p.edit.overlays || []).filter((o) => o.type !== 'image');
+  await putProject(p);
+  $('projectActions').hidden = true;
+  await loadProject(p.id);
+  toast('Guion duplicado en un vídeo nuevo (sin tomas)');
+});
+$('projectDelete').addEventListener('click', async () => {
+  if (!confirm(`¿Borrar «${state.project.name}» con todas sus tomas? No se puede deshacer.`)) return;
+  await deleteProject(state.project.id);
+  $('projectActions').hidden = true;
+  await loadProject(null);
 });
 
 // ---------------------------------------------------------------- navegación
@@ -152,7 +257,8 @@ function showView(name) {
   for (const v of ['script', 'record', 'clips']) $(`view-${v}`).hidden = v !== name;
   $('tabs').hidden = name === 'record';
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
-  if (name === 'clips') renderClips();
+  if (name === 'clips') editor.show();
+  else editor.hide();
   if (name === 'script') renderSegPreview();
   window.scrollTo(0, 0);
 }
@@ -194,6 +300,7 @@ function applySettings() {
   $('speedVal').textContent = s.speed;
   $('fontVal').textContent = `${s.fontSize}px`;
   $('heightVal').textContent = `${s.boxHeight}%`;
+  $('boxHeight').value = String(s.boxHeight);
   $('opacityVal').textContent = `${s.bgOpacity}%`;
   $('preview').classList.toggle('mirror', s.facing === 'user');
 
@@ -272,12 +379,6 @@ bindSelect('fps', 'fps', { numeric: true, onChange: reopenCamera });
 bindSelect('bitrateLevel', 'bitrateLevel');
 bindSelect('voiceLang', 'voiceLang');
 bindSelect('voiceMode', 'voiceMode', { onChange: restartVoiceIfActive });
-
-$('exportRes').value = String(state.settings.exportRes);
-$('exportRes').addEventListener('change', (e) => {
-  const v = e.target.value;
-  setSetting('exportRes', v === 'original' ? 'original' : Number(v));
-});
 
 function setOrientation(o) {
   if (state.recording || state.settings.orientation === o) return;
@@ -380,6 +481,47 @@ function buildImagePanel() {
     wrap.append(head, input);
     box.append(wrap);
   }
+  const blur = $('bgBlur');
+  blur.value = String(Math.round(state.settings.bgBlur * 100));
+  blur.addEventListener('input', () => {
+    setSetting('bgBlur', Number(blur.value) / 100);
+    applyBackground();
+  });
+  document.querySelectorAll('#bgModeToggle button').forEach((b) =>
+    b.addEventListener('click', () => {
+      const mode = b.dataset.bg;
+      if (mode === 'blur' && !state.settings.bgBlur) setSetting('bgBlur', 0.6);
+      setSetting('bgMode', mode);
+      syncImagePanel();
+      applyBackground();
+      if (mode === 'image' && !state.bgImage) $('bgImageFile').click();
+    }),
+  );
+  $('bgColor').value = state.settings.bgColor;
+  $('bgColor').addEventListener('input', (e) => {
+    setSetting('bgColor', e.target.value);
+    applyBackground();
+  });
+  $('bgImagePick').addEventListener('click', () => $('bgImageFile').click());
+  $('bgImageFile').addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      await putAsset({ id: 'bg-image', projectId: '__settings__', kind: 'background', name: file.name, blob: file });
+      state.bgImage = await createImageBitmap(file);
+      state.bgImageName = file.name;
+      setSetting('bgMode', 'image');
+      syncImagePanel();
+      applyBackground();
+    } catch (err) {
+      console.error(err);
+      toast('No se pudo usar esa imagen');
+    }
+  });
+  document.querySelectorAll('#focusToggle button').forEach((b) =>
+    b.addEventListener('click', () => (b.dataset.focus === 'lock' ? lockFocus() : unlockFocus())),
+  );
   $('resetAdjust').addEventListener('click', () => {
     setSetting('adjust', { ...ADJUST_DEFAULTS });
     setSetting('preset', 'natural');
@@ -398,6 +540,157 @@ function syncImagePanel() {
   document.querySelectorAll('#presets button').forEach((b) =>
     b.classList.toggle('active', b.dataset.preset === state.settings.preset),
   );
+  const bb = Math.round(state.settings.bgBlur * 100);
+  $('bgBlur').value = String(bb);
+  $('bgBlurVal').textContent = bb ? String(bb) : 'No';
+  const mode = state.settings.bgMode || 'none';
+  document.querySelectorAll('#bgModeToggle button').forEach((b) => b.classList.toggle('active', b.dataset.bg === mode));
+  $('bgBlurField').hidden = mode !== 'blur';
+  $('bgColorField').hidden = mode !== 'color';
+  $('bgImageField').hidden = mode !== 'image';
+  $('bgImageName').textContent = state.bgImage ? state.bgImageName || 'Imagen elegida' : 'Ninguna imagen';
+}
+
+// ---------------------------------------------------------------- fondo desenfocado
+
+let bgLoadToken = 0;
+/** Aplica el fondo elegido (original, desenfocado, color o imagen) a la cámara. */
+async function applyBackground() {
+  const s = state.settings;
+  const mode = s.bgMode || 'none';
+  const cfg = { mode, blur: s.bgBlur, color: s.bgColor, image: state.bgImage };
+  const status = $('bgBlurStatus');
+  const okText = {
+    blur: 'Fondo desenfocado: detecta a la persona y difumina el resto.',
+    color: 'Fondo de color: detecta a la persona y cambia todo lo demás.',
+    image: state.bgImage ? 'Fondo con imagen: detecta a la persona y pone la imagen detrás.' : 'Elige una imagen de fondo.',
+    none: '',
+  };
+  if (mode !== 'none' && !camera.grader.usesGpu) {
+    status.textContent = 'Este dispositivo no admite cambiar el fondo (necesita WebGL).';
+    return;
+  }
+  const needsModel = mode !== 'none' && !(mode === 'blur' && !s.bgBlur) && !camera.mask.ready;
+  if (needsModel) {
+    const token = ++bgLoadToken;
+    status.textContent = 'Preparando la detección de la persona (solo la primera vez, ~15 MB)…';
+    try {
+      await camera.setBackground(cfg);
+      if (token === bgLoadToken) status.textContent = okText[mode];
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'No se pudo activar el cambio de fondo en este dispositivo.';
+      camera.bg.mode = 'none';
+    }
+    return;
+  }
+  camera.setBackground(cfg);
+  status.textContent = okText[mode];
+}
+
+// ---------------------------------------------------------------- enfoque
+
+state.focusLocked = false;
+let focusWarned = false;
+
+function showFocusRing(x, y, locked) {
+  const ring = $('focusRing');
+  ring.hidden = true;
+  ring.classList.toggle('locked', locked);
+  ring.style.left = `${x}px`;
+  ring.style.top = `${y}px`;
+  void ring.offsetWidth; // reinicia la animación
+  ring.hidden = false;
+  clearTimeout(showFocusRing.t);
+  if (!locked) showFocusRing.t = setTimeout(() => (ring.hidden = true), 1400);
+}
+
+function syncFocusUi() {
+  $('focusBadge').hidden = !state.focusLocked;
+  document.querySelectorAll('#focusToggle button').forEach((b) =>
+    b.classList.toggle('active', (b.dataset.focus === 'lock') === state.focusLocked),
+  );
+  const f = camera.focusSupport();
+  $('focusHelp').textContent = !f.modes.length
+    ? 'Este navegador no deja controlar el enfoque (en iPhone siempre es automático). Toca la imagen igualmente: en Android con Chrome sí funciona.'
+    : f.point
+      ? 'Toca la imagen para enfocar ahí. Mantén pulsado para bloquear el enfoque.'
+      : 'Toca la imagen para volver a enfocar. Mantén pulsado para bloquear el enfoque.';
+}
+
+async function lockFocus(x, y) {
+  if (await camera.lockFocus()) {
+    state.focusLocked = true;
+    if (x !== undefined) showFocusRing(x, y, true);
+    toast('Enfoque y exposición bloqueados');
+  } else toast('Esta cámara no permite bloquear el enfoque');
+  syncFocusUi();
+}
+
+async function unlockFocus() {
+  state.focusLocked = false;
+  $('focusRing').hidden = true;
+  await camera.focusAuto();
+  syncFocusUi();
+}
+
+/** Convierte un toque en pantalla a coordenadas 0..1 del encuadre grabado (canvas con object-fit: contain). */
+function tapToFrame(clientX, clientY) {
+  const el = $('preview');
+  const r = el.getBoundingClientRect();
+  const cw = el.width;
+  const ch = el.height;
+  const scale = Math.min(r.width / cw, r.height / ch);
+  const w = cw * scale;
+  const h = ch * scale;
+  let u = (clientX - r.left - (r.width - w) / 2) / w;
+  const v = (clientY - r.top - (r.height - h) / 2) / h;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+  if (state.settings.facing === 'user') u = 1 - u; // la vista previa frontal va en espejo
+  return { u, v };
+}
+
+{
+  const preview = $('preview');
+  let pressTimer = 0;
+  let start = null;
+  preview.addEventListener('pointerdown', (e) => {
+    start = { x: e.clientX, y: e.clientY, long: false };
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      if (!start) return;
+      start.long = true;
+      const { x, y } = start;
+      const p = tapToFrame(x, y);
+      if (!p) return;
+      // Enfoca en ese punto, deja que la cámara ajuste y bloquea.
+      showFocusRing(x, y, false);
+      camera.focusAt(p.u, p.v).then(() => setTimeout(() => lockFocus(x, y), 600));
+    }, 600);
+  });
+  preview.addEventListener('pointerup', async (e) => {
+    clearTimeout(pressTimer);
+    if (!start || start.long || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+      start = null;
+      return;
+    }
+    start = null;
+    if (!$('settings').hidden && !$('settings').classList.contains('compact')) return;
+    const p = tapToFrame(e.clientX, e.clientY);
+    if (!p) return;
+    state.focusLocked = false;
+    showFocusRing(e.clientX, e.clientY, false);
+    const result = await camera.focusAt(p.u, p.v);
+    syncFocusUi();
+    if (result === 'unsupported' && !focusWarned) {
+      focusWarned = true;
+      toast('Tu navegador no deja elegir el punto de enfoque; la cámara enfoca sola');
+    }
+  });
+  preview.addEventListener('pointercancel', () => {
+    clearTimeout(pressTimer);
+    start = null;
+  });
 }
 
 /** Controles propios de la cámara del móvil (solo los que el dispositivo admite). */
@@ -515,6 +808,9 @@ async function startCamera() {
     });
     camera.setAdjust(s.adjust);
     renderHardware();
+    state.focusLocked = false;
+    syncFocusUi();
+    if ((s.bgMode || 'none') !== 'none') applyBackground();
   } catch (err) {
     console.error(err);
     const el = $('camError');
@@ -613,9 +909,9 @@ function loadSegment(i) {
   stopFollowing();
   state.current = Math.max(0, Math.min(i, state.segments.length - 1));
   renderPrompterText(state.segments[state.current] ?? '');
-  const has = state.clips.has(state.current);
+  const n = (state.takes.get(state.current) || []).length;
   $('segLabel').textContent =
-    `Clip ${state.current + 1} / ${state.segments.length}` + (has ? ' · ✓ grabado (se reemplazará)' : '');
+    `Clip ${state.current + 1} / ${state.segments.length}` + (n ? ` · ✓ ${n} toma${n > 1 ? 's' : ''}` : '');
   $('prevSeg').disabled = state.current === 0;
   $('nextSeg').disabled = state.current >= state.segments.length - 1;
 }
@@ -702,6 +998,95 @@ scroller.addEventListener('pointerup', (e) => {
     carry = 0;
   }, 120);
 });
+
+// ---------------------------------------------------------------- mover / redimensionar el texto
+
+const prompterEl = $('prompter');
+const screenKey = () => (innerHeight >= innerWidth ? 'portrait' : 'landscape');
+const clamp = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
+
+/** Coloca el cuadro según lo guardado para esta orientación de pantalla (o la posición por defecto). */
+function applyBoxPos() {
+  const pos = state.settings.boxPos?.[screenKey()];
+  const st = prompterEl.style;
+  if (!pos) {
+    st.left = st.top = st.width = st.right = '';
+    return;
+  }
+  const W = innerWidth;
+  const H = innerHeight;
+  const w = clamp((pos.w / 100) * W, 140, W);
+  const h = prompterEl.offsetHeight;
+  st.right = 'auto';
+  st.width = `${w}px`;
+  st.left = `${clamp((pos.x / 100) * W, 0, W - w)}px`;
+  st.top = `${clamp((pos.y / 100) * H, 0, H - Math.min(h, H))}px`;
+}
+
+function saveBoxPos() {
+  const r = prompterEl.getBoundingClientRect();
+  const W = innerWidth;
+  const H = innerHeight;
+  setSetting('boxPos', {
+    ...state.settings.boxPos,
+    [screenKey()]: { x: (r.left / W) * 100, y: (r.top / H) * 100, w: (r.width / W) * 100 },
+  });
+}
+
+function dragBehaviour(handle, onMove) {
+  let start = null;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const r = prompterEl.getBoundingClientRect();
+    start = { x: e.clientX, y: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+    prompterEl.classList.add('moving');
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    onMove(start, e.clientX - start.x, e.clientY - start.y);
+  });
+  const end = () => {
+    if (!start) return;
+    start = null;
+    prompterEl.classList.remove('moving');
+    saveBoxPos();
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+// Asa superior: mover a cualquier sitio de la pantalla.
+dragBehaviour($('dragHandle'), (s, dx, dy) => {
+  const st = prompterEl.style;
+  st.right = 'auto';
+  st.width = `${s.w}px`;
+  st.left = `${clamp(s.left + dx, 0, innerWidth - s.w)}px`;
+  st.top = `${clamp(s.top + dy, 0, innerHeight - s.h)}px`;
+});
+
+// Esquina inferior derecha: ancho y alto.
+dragBehaviour($('resizeHandle'), (s, dx, dy) => {
+  const st = prompterEl.style;
+  st.right = 'auto';
+  st.left = `${s.left}px`;
+  st.top = `${s.top}px`;
+  st.width = `${clamp(s.w + dx, 140, innerWidth - s.left)}px`;
+  const h = clamp(s.h + dy, innerHeight * 0.12, Math.min(innerHeight * 0.95, innerHeight - s.top));
+  state.settings.boxHeight = Math.round((h / innerHeight) * 100);
+  prompterEl.style.setProperty('--box-h', `${state.settings.boxHeight}vh`);
+  $('heightVal').textContent = `${state.settings.boxHeight}%`;
+});
+
+$('resetBox').addEventListener('click', () => {
+  setSetting('boxPos', { ...state.settings.boxPos, [screenKey()]: undefined });
+  setSetting('boxHeight', DEFAULTS.boxHeight);
+  applyBoxPos();
+  toast('Texto colocado en su sitio de siempre');
+});
+
+addEventListener('resize', applyBoxPos);
 
 // ---------------------------------------------------------------- seguir la voz
 
@@ -865,11 +1250,19 @@ async function startRecording() {
     const duration = (performance.now() - state.recStart) / 1000;
     const type = rec.mimeType || mime || 'video/webm';
     const blob = new Blob(chunks, { type });
-    const clip = { seg, text, blob, mime: type, duration, createdAt: Date.now(), width: br.width, height: br.height };
+    const take = {
+      id: uid(), projectId: state.project.id, seg, blob, mime: type, duration,
+      createdAt: Date.now(), width: br.width, height: br.height, text,
+    };
     try {
-      await putClip(clip);
-      state.clips.set(seg, clip);
+      await putTake(take);
+      if (!state.takes.has(seg)) state.takes.set(seg, []);
+      state.takes.get(seg).push(take);
+      // La toma nueva pasa a ser la elegida para ese fragmento.
+      state.project.clips[seg] = { ...(state.project.clips[seg] || {}), take: take.id };
+      saveProject();
       updateBadge();
+      editor.analyzeInBackground(take);
       afterClipSaved(seg);
     } catch (err) {
       console.error(err);
@@ -902,8 +1295,8 @@ function stopRecording() {
 function afterClipSaved(seg) {
   const isLast = seg >= state.segments.length - 1;
   if (isLast) {
-    const missing = state.segments.findIndex((_, i) => !state.clips.has(i));
-    toast(missing === -1 ? '¡Todos los clips grabados! Ve a «Clips» para unirlos' : `Clip ${seg + 1} guardado`);
+    const missing = state.segments.findIndex((_, i) => !hasTake(i));
+    toast(missing === -1 ? '¡Todos los clips grabados! Ve a «Editar» para montarlo' : `Clip ${seg + 1} guardado`);
     loadSegment(seg);
     return;
   }
@@ -928,7 +1321,16 @@ async function openRecorder(i) {
   if (!state.segments.length) return;
   showView('record');
   applySettings();
+  applyBoxPos();
   loadSegment(i);
+  try {
+    if (!localStorage.getItem('teleclip.hint.box')) {
+      localStorage.setItem('teleclip.hint.box', '1');
+      toast('Arrastra la barrita de arriba del texto para moverlo, y la esquina para cambiar su tamaño');
+    }
+  } catch {
+    /* sin almacenamiento */
+  }
   await startCamera();
   keepAwake(true);
 }
@@ -954,10 +1356,10 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !$('view-record').hidden) keepAwake(true);
 });
 
-// ---------------------------------------------------------------- clips
+// ---------------------------------------------------------------- editor
 
 function updateBadge() {
-  const n = state.clips.size;
+  const n = [...state.takes.values()].filter((l) => l.length).length;
   $('clipBadge').hidden = n === 0;
   $('clipBadge').textContent = n;
 }
@@ -973,162 +1375,36 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-const extOf = (mime) => (mime?.includes('mp4') ? 'mp4' : 'webm');
-
-function orderedClips() {
-  return [...state.clips.values()].sort((a, b) => a.seg - b.seg);
-}
-
-function renderClips() {
-  state.clipUrls.forEach((u) => URL.revokeObjectURL(u));
-  state.clipUrls = [];
-  const list = $('clipList');
-  list.replaceChildren();
-  const total = Math.max(state.segments.length, ...[...state.clips.keys()].map((k) => k + 1), 0);
-
-  if (total === 0) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'Todavía no hay guion ni clips. Escribe tu guion en la pestaña «Guion».';
-    list.append(li);
-  }
-
-  for (let i = 0; i < total; i++) {
-    const clip = state.clips.get(i);
-    const segText = state.segments[i];
-    const li = document.createElement('li');
-    li.className = 'clip';
-
-    const head = document.createElement('div');
-    head.className = 'clip-head';
-    const num = document.createElement('span');
-    num.className = 'seg-num';
-    num.textContent = i + 1;
-    const txt = document.createElement('span');
-    txt.className = 'seg-text';
-    txt.textContent = segText ?? clip?.text ?? '';
-    head.append(num, txt);
-    li.append(head);
-
-    if (clip) {
-      if (segText === undefined || segText !== clip.text) {
-        const w = document.createElement('div');
-        w.className = 'warn';
-        w.textContent = segText === undefined
-          ? 'Este fragmento ya no existe en el guion.'
-          : 'El texto del guion cambió desde esta toma.';
-        li.append(w);
-      }
-      const url = URL.createObjectURL(clip.blob);
-      state.clipUrls.push(url);
-      const v = document.createElement('video');
-      v.src = url;
-      v.controls = true;
-      v.playsInline = true;
-      v.preload = 'metadata';
-      li.append(v);
-    }
-
-    const row = document.createElement('div');
-    row.className = 'row';
-    const meta = document.createElement('span');
-    meta.className = 'muted';
-    meta.textContent = clip ? fmtTime(clip.duration) : 'Sin grabar';
-    row.append(meta);
-    if (segText !== undefined) {
-      row.append(button(clip ? 'Regrabar' : '● Grabar', clip ? 'ghost' : 'primary', () => openRecorder(i)));
-    }
-    if (clip) {
-      row.append(
-        button('Descargar', 'ghost', () =>
-          download(clip.blob, `teleclip-clip-${String(i + 1).padStart(2, '0')}.${extOf(clip.mime)}`),
-        ),
-        button('Borrar', 'ghost danger', async () => {
-          if (!confirm(`¿Borrar el clip ${i + 1}?`)) return;
-          await deleteClip(i);
-          state.clips.delete(i);
-          updateBadge();
-          renderClips();
-        }),
-      );
-    }
-    li.append(row);
-    list.append(li);
-  }
-
-  const n = state.clips.size;
-  $('exportBtn').disabled = n === 0;
-  $('exportBtn').textContent = n ? `Unir ${n} clip${n > 1 ? 's' : ''} y exportar` : 'Unir clips y exportar';
-  $('clearAll').disabled = n === 0;
-}
-
-function button(label, cls, onClick) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = cls;
-  b.textContent = label;
-  b.addEventListener('click', onClick);
-  return b;
-}
-
-$('clearAll').addEventListener('click', async () => {
-  if (!confirm('¿Borrar todos los clips grabados? No se puede deshacer.')) return;
-  await clearClips();
-  state.clips.clear();
+async function removeTake(take) {
+  await deleteTake(take.id);
+  const list = (state.takes.get(take.seg) || []).filter((t) => t.id !== take.id);
+  if (list.length) state.takes.set(take.seg, list);
+  else state.takes.delete(take.seg);
+  const cfg = state.project.clips[take.seg];
+  if (cfg?.take === take.id) cfg.take = list[list.length - 1]?.id ?? null;
+  saveProject();
   updateBadge();
-  renderClips();
-});
+}
 
-$('exportBtn').addEventListener('click', async () => {
-  const clips = orderedClips();
-  if (!clips.length) return;
-  const bar = $('exportProgress');
-  const status = $('exportStatus');
-  $('exportBtn').disabled = true;
-  $('exportResult').hidden = true;
-  bar.hidden = false;
-  bar.firstElementChild.style.width = '0%';
-  status.textContent = 'Uniendo clips en tu dispositivo…';
-  try {
-    const { joinClips } = await import('./export.js');
-    const resolution = state.settings.exportRes;
-    if (resolution !== 'original') status.textContent = `Reescalando a ${resolution}p y codificando MP4…`;
-    const result = await joinClips(
-      clips.map((c) => c.blob),
-      {
-        resolution,
-        onProgress: (p) => (bar.firstElementChild.style.width = `${Math.round(p * 100)}%`),
-      },
-    );
-    if (state.exportUrl) URL.revokeObjectURL(state.exportUrl);
-    state.exportUrl = URL.createObjectURL(result.blob);
-    const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-    state.exportFile = new File([result.blob], `teleclip-${stamp}.${result.ext}`, { type: result.mime });
-    $('exportVideo').src = state.exportUrl;
-    $('exportResult').hidden = false;
-    $('shareExport').hidden = !(navigator.canShare && navigator.canShare({ files: [state.exportFile] }));
-    const mb = (result.blob.size / 1048576).toFixed(1);
-    status.textContent =
-      `Listo: ${clips.length} clips · ${result.width}×${result.height} · ${mb} MB · MP4 (${result.mode}).`;
-    bar.firstElementChild.style.width = '100%';
-  } catch (err) {
-    console.error(err);
-    status.textContent = `No se pudo unir: ${err?.message || err}. Puedes descargar los clips por separado.`;
-  } finally {
-    $('exportBtn').disabled = false;
-    setTimeout(() => (bar.hidden = true), 800);
-  }
-});
+const fileBase = () =>
+  (state.project?.name || 'teleclip')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase() || 'teleclip';
 
-$('downloadExport').addEventListener('click', () => {
-  if (state.exportFile) download(state.exportFile, state.exportFile.name);
-});
-$('shareExport').addEventListener('click', async () => {
-  try {
-    await navigator.share({ files: [state.exportFile], title: 'Vídeo TeleClip' });
-  } catch {
-    /* cancelado */
-  }
+const editor = createEditor({
+  getProject: () => state.project,
+  saveProject,
+  segments: () => state.segments,
+  takes: () => state.takes,
+  deleteTake: removeTake,
+  openRecorder: (seg) => openRecorder(seg),
+  toast: (m) => toast(m),
+  download,
+  fmtTime: (s) => fmtTime(s),
+  fileBase,
 });
 
 // ---------------------------------------------------------------- utilidades
@@ -1150,16 +1426,24 @@ function toast(msg) {
 // ---------------------------------------------------------------- arranque
 
 async function init() {
+  if (state.settings.bgMode == null) state.settings.bgMode = state.settings.bgBlur > 0 ? 'blur' : 'none';
+  try {
+    const bgAsset = await getAsset('bg-image');
+    if (bgAsset?.blob) {
+      state.bgImage = await createImageBitmap(bgAsset.blob);
+      state.bgImageName = bgAsset.name;
+    }
+  } catch {
+    /* sin imagen de fondo */
+  }
   buildImagePanel();
   applySettings();
   try {
-    for (const c of await getClips()) state.clips.set(c.seg, c);
+    await loadProject(state.settings.projectId);
   } catch (err) {
     console.error(err);
     toast('No se pudo abrir el almacenamiento local');
   }
-  updateBadge();
-  updateSegments();
   requestPersistence();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});

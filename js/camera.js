@@ -2,7 +2,8 @@
 // de salida (vertical 9:16 u horizontal 16:9), con la corrección de color aplicada en la GPU.
 // Lo que se ve en pantalla es exactamente lo que se graba.
 
-import { Grader } from './grade.js';
+import { Grader, coverCrop } from './grade.js';
+import { PersonMask } from './segment.js';
 
 /** Tamaño de salida: el número es el lado corto (720, 1080, 2160). */
 export function outputSize(quality, orientation) {
@@ -31,6 +32,25 @@ export class Camera {
     this.fps = 30;
     this.running = false;
     this.frameCount = 0;
+    this.mask = new PersonMask();
+    this.bg = { mode: 'none', blur: 0, color: [0.1, 0.1, 0.12] };
+  }
+
+  get bgActive() {
+    return this.bg.mode !== 'none' && (this.bg.mode !== 'blur' || this.bg.blur > 0);
+  }
+
+  /**
+   * Fondo: { mode: 'none'|'blur'|'color'|'image', blur: 0..1, color: '#rrggbb', image: ImageBitmap|null }.
+   * La primera vez descarga el modelo de segmentación.
+   */
+  async setBackground({ mode, blur, color, image }) {
+    const hex = /^#?([0-9a-f]{6})$/i.exec(color || '');
+    const n = hex ? parseInt(hex[1], 16) : 0x1a1a1f;
+    this.bg = { mode, blur, color: [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255] };
+    this.grader.setBackgroundImage(mode === 'image' ? image : null);
+    if (mode === 'image' && !image) this.bg.mode = 'none';
+    if (this.bgActive && !this.mask.ready) await this.mask.enable();
   }
 
   get videoTrack() {
@@ -70,6 +90,7 @@ export class Camera {
     this.stream = await navigator.mediaDevices.getUserMedia({ video, audio });
     this.video.srcObject = this.stream;
     await this.video.play().catch(() => {});
+    await this.focusAuto();
     this.running = true;
     this.#loop();
   }
@@ -79,7 +100,9 @@ export class Camera {
     const draw = () => {
       if (!this.running) return;
       if (v.readyState >= 2 && v.videoWidth) {
-        this.grader.draw(v, v.videoWidth, v.videoHeight);
+        const bg = this.bgActive && this.mask.ready;
+        if (bg) this.mask.process(v);
+        this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
       }
       schedule();
@@ -109,6 +132,80 @@ export class Camera {
     const audio = this.audioTrack;
     if (audio) out.addTrack(audio);
     return out;
+  }
+
+  /** Qué sabe hacer la cámara con el enfoque. */
+  focusSupport() {
+    const track = this.videoTrack;
+    const caps = track?.getCapabilities?.() ?? {};
+    const supported = navigator.mediaDevices.getSupportedConstraints?.() ?? {};
+    const modes = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+    return {
+      point: !!supported.pointsOfInterest && modes.length > 0,
+      modes,
+      exposureModes: Array.isArray(caps.exposureMode) ? caps.exposureMode : [],
+      lock: modes.includes('manual') || modes.includes('single-shot'),
+    };
+  }
+
+  /** Enfoque automático continuo (por defecto: es lo mejor para vídeo). */
+  async focusAuto() {
+    const f = this.focusSupport();
+    const c = {};
+    if (f.modes.includes('continuous')) c.focusMode = 'continuous';
+    if (f.exposureModes.includes('continuous')) c.exposureMode = 'continuous';
+    if (f.point) c.pointsOfInterest = [{ x: 0.5, y: 0.5 }];
+    if (Object.keys(c).length) await this.#apply(c);
+  }
+
+  /**
+   * Enfoca (y expone) en el punto tocado. `u`,`v` van de 0 a 1 sobre el encuadre grabado.
+   * @returns {Promise<'point'|'refocus'|'unsupported'>}
+   */
+  async focusAt(u, v) {
+    const f = this.focusSupport();
+    const vid = this.video;
+    if (!f.modes.length) return 'unsupported';
+    const [cx, cy, cw, ch] = coverCrop(vid.videoWidth, vid.videoHeight, this.canvas.width, this.canvas.height);
+    const point = { x: Math.min(1, Math.max(0, cx + u * cw)), y: Math.min(1, Math.max(0, cy + v * ch)) };
+    const c = {};
+    if (f.point) c.pointsOfInterest = [point];
+    // Enfoque continuo sobre el punto: sigue el foco si te mueves un poco. Si no hay, un enfoque puntual.
+    if (f.modes.includes('continuous')) c.focusMode = 'continuous';
+    else if (f.modes.includes('single-shot')) c.focusMode = 'single-shot';
+    if (f.exposureModes.includes('continuous')) c.exposureMode = 'continuous';
+    if (!f.point && f.modes.includes('single-shot')) {
+      // Sin elegir punto: forzar un nuevo enfoque (puntual y luego continuo).
+      await this.#apply({ focusMode: 'single-shot' });
+      await this.#apply(c);
+      return 'refocus';
+    }
+    await this.#apply(c);
+    return f.point ? 'point' : 'refocus';
+  }
+
+  /** Bloquea enfoque y exposición donde están ahora (para que no «busque» mientras grabas). */
+  async lockFocus() {
+    const track = this.videoTrack;
+    const f = this.focusSupport();
+    if (!track || !f.lock) return false;
+    const settings = track.getSettings?.() ?? {};
+    const c = {};
+    if (f.modes.includes('manual') && settings.focusDistance !== undefined) {
+      c.focusMode = 'manual';
+      c.focusDistance = settings.focusDistance;
+    } else c.focusMode = f.modes.includes('manual') ? 'manual' : 'single-shot';
+    if (f.exposureModes.includes('manual')) c.exposureMode = 'manual';
+    await this.#apply(c);
+    return true;
+  }
+
+  async #apply(c) {
+    try {
+      await this.videoTrack?.applyConstraints({ advanced: [c] });
+    } catch (err) {
+      console.warn('Restricción de cámara no aplicada', c, err);
+    }
   }
 
   /** Controles de hardware disponibles: { zoom: {min,max,step,value}, torch: {value}, … } */

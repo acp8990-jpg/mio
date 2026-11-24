@@ -18,21 +18,39 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
      - *A velocidad fija*.
    - **Vertical 9:16 u horizontal 16:9**: botón de formato arriba, o ⚙ → Grabación. La vista previa muestra
      exactamente el encuadre que se graba.
+   - **Toca la imagen para enfocar** (y exponer) en ese punto; **mantén pulsado** para bloquear enfoque y
+     exposición (aparece «AF bloqueado»). Funciona en Android con Chrome; en iPhone el navegador no lo permite
+     y el enfoque es siempre automático.
+   - **Mueve el cuadro de texto** arrastrando la barrita de arriba, y **cambia su tamaño** con la esquina inferior
+     derecha. Se recuerda por separado con el móvil en vertical y en horizontal (⚙ → Texto → «Volver a colocar
+     el texto arriba» lo devuelve a su sitio).
    - Toca el texto para pausar o reanudar. Arrástralo para colocarlo a mano y la lectura se resincroniza.
    - ▶ ensaya sin grabar. ⏮ ⏭ cambian de fragmento. ⟲ cambia de cámara.
    - ⚙ tiene cuatro pestañas:
      - **Texto**: velocidad, tamaño, alto y fondo, espejo, cuenta atrás, avanzar o parar solo.
      - **Voz**: modo, idioma del guion, sensibilidad del micrófono con medidor.
-     - **Imagen**: estilos (Natural, Vivo, Cálido, Frío, Retrato, Cine, B/N) y ajustes de exposición, brillo,
+     - **Imagen**: **fondo** original, desenfocado (barra de 0 a 100), de un color o con una imagen tuya (detecta
+       a la persona con MediaPipe; el modelo se descarga solo la primera vez, ~15 MB), **enfoque** automático o bloqueado, estilos (Natural, Vivo, Cálido, Frío, Retrato, Cine, B/N) y ajustes de exposición, brillo,
        contraste, luces, sombras, saturación, intensidad, temperatura, tinte, nitidez, suavizado de piel y viñeta.
        Más los controles propios de la cámara si el móvil los ofrece (zoom, exposición, balance de blancos,
        enfoque manual, linterna).
      - **Grabación**: formato, resolución (720p, 1080p, 4K), 30/60 fps, calidad de compresión y limpieza del
        sonido (reducción de ruido, cancelación de eco, volumen automático).
-3. **Clips**: revisa cada toma, regrábala, descárgala o bórrala. **Unir clips y exportar** crea un único
-   vídeo **MP4 (H.264 + AAC)** que puedes descargar o compartir directamente.
-   Elige la resolución final: Original, 720p, 1080p, 1440p (2K) o **2160p (4K)**. Los clips se reescalan
-   (también hacia arriba) con suavizado de alta calidad. En vertical, 4K = 2160×3840.
+3. **Editar** (vista previa con todos los efectos, pestañas):
+   - **Clips**: varias tomas por fragmento (eliges la buena), recorte automático o manual con forma de onda,
+     **quitar silencios** (suave o fuerte, estilo TikTok), reordenar con ↑ ↓ y corregir el texto de cada clip.
+   - **Subtítulos automáticos**: salen de tu guion sincronizados con tu voz. Estilos Resaltado, Karaoke, Grande y
+     Clásico; letra, tamaño, posición, palabras por frase, mayúsculas y colores.
+   - **Efectos**: zoom alterno en cada corte o acercamiento progresivo, transiciones (fundido, destello, zoom) y
+     formato 9:16, 4:5, 1:1 o 16:9 con encuadre.
+   - **Audio**: música de fondo que baja sola cuando hablas, mejora de voz (ecualizador y compresor), silenciar el
+     ruido entre frases y volumen de la voz.
+   - **Elementos**: textos, emojis e imágenes que se arrastran sobre la vista previa, con su momento de inicio y
+     fin; logo o marca de agua en una esquina; barra de progreso.
+   - **Exportar**: resolución hasta 4K, portada con título (descargable en JPG o puesta al principio del vídeo) y
+     MP4 final, que se descarga o se comparte.
+4. **Proyectos**: en la pestaña Guion, el menú ⋯ crea vídeos nuevos, renombra, duplica el guion o borra. Cada
+   vídeo guarda su guion, sus tomas y su edición.
 
 ## Exportación
 
@@ -54,6 +72,10 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
 | Cámara y micrófono | `getUserMedia` |
 | Encuadre y color | La cámara se dibuja en un canvas del tamaño exacto (p. ej. 1080×1920) y un shader WebGL aplica la corrección de color en la GPU. Se graba ese canvas: lo que ves es lo que se graba |
 | Grabación de cada clip | `MediaRecorder`: MP4 H.264 si el navegador lo permite (iPhone, Chrome reciente) y si no WebM |
+| Fondo desenfocado | MediaPipe Selfie Segmenter (Apache-2.0, en `vendor/mediapipe/`) + desenfoque gaussiano en varias pasadas en la GPU |
+| Enfoque por toque | `pointsOfInterest` / `focusMode` de MediaStreamTrack (Image Capture) |
+| Editor | `js/timeline.js` (análisis de voz, recortes, silencios, tiempo de cada palabra), `js/render.js` (dibujo común de vista previa y exportación), `js/player.js`, `js/editor.js` |
+| Mezcla de audio | Web Audio `OfflineAudioContext`: voz con EQ, compresor y puerta; música con atenuación automática |
 | Seguir la voz | Web Speech API + alineación tolerante a errores con el guion (`js/voice.js`); plan B por nivel del micrófono |
 | Almacenamiento | IndexedDB para los clips y `localStorage` para el guion y los ajustes |
 | Unir, reescalar y exportar a MP4 | [Mediabunny](https://github.com/Vanilagy/mediabunny) + `@mediabunny/aac-encoder` (MPL-2.0, incluidas en `vendor/`), sobre WebCodecs |

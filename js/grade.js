@@ -57,6 +57,13 @@ uniform sampler2D uTex;
 uniform vec2 uTexel;
 uniform float uExposure, uBrightness, uContrast, uSaturation, uVibrance;
 uniform float uTemp, uTint, uHigh, uShadow, uSharp, uSmooth, uVignette;
+uniform sampler2D uBlurTex;
+uniform sampler2D uMask;
+uniform sampler2D uBgImage;
+uniform float uBg;
+uniform float uBgMode; // 1 desenfoque, 2 color, 3 imagen
+uniform vec3 uBgColor;
+uniform vec4 uBgCrop;
 
 vec3 px(vec2 o) { return texture2D(uTex, vUv + o * uTexel).rgb; }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -78,6 +85,16 @@ void main() {
       c = mix(c, soft, uSmooth * (1.0 - edge) * 0.85);
     }
     if (uSharp > 0.0) c += (c - b) * uSharp * 1.6;
+  }
+
+  if (uBg > 0.0) {
+    // Fondo sustituido detrás de la persona (máscara de MediaPipe, bordes suavizados).
+    float m = smoothstep(0.3, 0.75, texture2D(uMask, vUv).r);
+    vec3 bg;
+    if (uBgMode < 1.5) bg = texture2D(uBlurTex, vUv).rgb;
+    else if (uBgMode < 2.5) bg = uBgColor;
+    else bg = texture2D(uBgImage, uBgCrop.xy + vOut * uBgCrop.zw).rgb;
+    c = mix(bg, c, m);
   }
 
   c *= exp2(uExposure);
@@ -104,6 +121,29 @@ void main() {
   c *= 1.0 - uVignette * smoothstep(0.35, 0.95, length(d) * 1.35);
 
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+const BLUR_VERT = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  vUv = aPos;
+  gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+// Gaussiano de 9 muestras en una dirección; con uDir = 0 es una copia (reducción de tamaño).
+const BLUR_FRAG = `
+precision mediump float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  vec3 c = texture2D(uTex, vUv).rgb * 0.227;
+  c += texture2D(uTex, vUv + uDir * 1.385).rgb * 0.316;
+  c += texture2D(uTex, vUv - uDir * 1.385).rgb * 0.316;
+  c += texture2D(uTex, vUv + uDir * 3.231).rgb * 0.070;
+  c += texture2D(uTex, vUv - uDir * 3.231).rgb * 0.070;
+  gl_FragColor = vec4(c, 1.0);
 }`;
 
 /** Recorte tipo «cover»: la parte central del fotograma con la proporción de salida. */
@@ -148,40 +188,141 @@ export class Grader {
   #initGl() {
     const gl = this.gl;
     const compile = (type, src) => {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-      return s;
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+      return sh;
     };
-    const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-    this.prog = prog;
-    gl.useProgram(prog);
+    const link = (vs, fs) => {
+      const prog = gl.createProgram();
+      gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+      gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+      return { prog, aPos: gl.getAttribLocation(prog, 'aPos') };
+    };
+    this.main = link(VERT, FRAG);
+    this.blur = link(BLUR_VERT, BLUR_FRAG);
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
-    const loc = gl.getAttribLocation(prog, 'aPos');
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-    this.tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+
+    this.tex = this.#texture();
+    this.maskTex = this.#texture();
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, 1, 1, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, new Uint8Array([255]));
+    this.maskVersion = -1;
+    this.fbos = null;
+
+    gl.useProgram(this.main.prog);
+    this.u = {};
+    for (const n of ['uCrop', 'uTexel', 'uExposure', 'uBrightness', 'uContrast', 'uSaturation', 'uVibrance',
+      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette', 'uBg', 'uTex', 'uBlurTex', 'uMask', 'uBgImage', 'uBgMode', 'uBgColor', 'uBgCrop']) {
+      this.u[n] = gl.getUniformLocation(this.main.prog, n);
+    }
+    gl.uniform1i(this.u.uTex, 0);
+    gl.uniform1i(this.u.uBlurTex, 1);
+    gl.uniform1i(this.u.uMask, 2);
+    gl.uniform1i(this.u.uBgImage, 3);
+    this.bgImageTex = this.#texture();
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0]));
+    this.bgImage = null;
+    this.bgImageSize = [1, 1];
+    gl.useProgram(this.blur.prog);
+    this.ub = { uTex: gl.getUniformLocation(this.blur.prog, 'uTex'), uDir: gl.getUniformLocation(this.blur.prog, 'uDir') };
+    gl.uniform1i(this.ub.uTex, 0);
+  }
+
+  /** Imagen de fondo (ImageBitmap) para el modo «imagen». */
+  setBackgroundImage(img) {
+    if (!this.gl || this.bgImage === img) return;
+    const gl = this.gl;
+    this.bgImage = img;
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.bgImageTex);
+    if (img) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+      this.bgImageSize = [img.width, img.height];
+    }
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  #texture() {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.u = {};
-    for (const n of ['uCrop', 'uTexel', 'uExposure', 'uBrightness', 'uContrast', 'uSaturation', 'uVibrance',
-      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette']) {
-      this.u[n] = gl.getUniformLocation(prog, n);
+    return t;
+  }
+
+  /** Dos texturas de render a tamaño reducido para el fondo desenfocado. */
+  #ensureFbos(w, h) {
+    if (this.fbos && this.fbos.w === w && this.fbos.h === h) return this.fbos;
+    const gl = this.gl;
+    const make = () => {
+      const tex = this.#texture();
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      return { tex, fb };
+    };
+    if (this.fbos) {
+      for (const f of [this.fbos.a, this.fbos.b]) {
+        gl.deleteTexture(f.tex);
+        gl.deleteFramebuffer(f.fb);
+      }
     }
+    this.fbos = { w, h, a: make(), b: make() };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return this.fbos;
+  }
+
+  #pass(program, target, w, h) {
+    const gl = this.gl;
+    gl.useProgram(program.prog);
+    gl.enableVertexAttribArray(program.aPos);
+    gl.vertexAttribPointer(program.aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.viewport(0, 0, w, h);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  /** Genera el fondo desenfocado: reduce el fotograma y aplica el gaussiano varias veces. */
+  #blurBackground(srcW, srcH, amount) {
+    const gl = this.gl;
+    // Más intensidad = imagen más pequeña y más pasadas.
+    const scale = 0.25 - amount * 0.13;
+    const w = Math.max(16, Math.round(srcW * scale));
+    const h = Math.max(16, Math.round(srcH * scale));
+    const { a, b } = this.#ensureFbos(w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.useProgram(this.blur.prog);
+    gl.uniform2f(this.ub.uDir, 0, 0);
+    this.#pass(this.blur, a.fb, w, h);
+    const spread = 1 + amount * 1.5;
+    const iterations = amount > 0.6 ? 3 : amount > 0.25 ? 2 : 1;
+    for (let i = 0; i < iterations; i++) {
+      gl.bindTexture(gl.TEXTURE_2D, a.tex);
+      gl.uniform2f(this.ub.uDir, spread / w, 0);
+      this.#pass(this.blur, b.fb, w, h);
+      gl.bindTexture(gl.TEXTURE_2D, b.tex);
+      gl.uniform2f(this.ub.uDir, 0, spread / h);
+      this.#pass(this.blur, a.fb, w, h);
+    }
+    return a.tex;
   }
 
   /** Dibuja un fotograma de `source` (vídeo de la cámara) en el canvas de salida. */
-  draw(source, srcW, srcH) {
+  /**
+   * @param {{data:Uint8Array,width:number,height:number,version:number}|null} mask máscara de persona
+   * @param {{mode:'none'|'blur'|'color'|'image', blur:number, color:number[]}} bg fondo
+   */
+  draw(source, srcW, srcH, mask = null, bg = null) {
     const { canvas } = this;
     const W = canvas.width;
     const H = canvas.height;
@@ -202,11 +343,44 @@ export class Grader {
     }
 
     const gl = this.gl;
-    gl.viewport(0, 0, W, H);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, source);
+
+    const mode = bg?.mode ?? 'none';
+    const useBg = mode !== 'none' && (mode !== 'blur' || bg.blur > 0) && mask?.data;
+    let blurTex = null;
+    if (useBg) {
+      if (mask.version !== this.maskVersion) {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, mask.width, mask.height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, mask.data);
+        this.maskVersion = mask.version;
+      }
+      if (mode === 'blur') blurTex = this.#blurBackground(srcW, srcH, bg.blur);
+    }
+
+    gl.useProgram(this.main.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, blurTex ?? this.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.bgImageTex);
+    gl.activeTexture(gl.TEXTURE0);
     const u = this.u;
+    gl.uniform1f(u.uBg, useBg ? 1 : 0);
+    if (useBg) {
+      gl.uniform1f(u.uBgMode, { blur: 1, color: 2, image: 3 }[mode]);
+      const col = bg.color || [0, 0, 0];
+      gl.uniform3f(u.uBgColor, col[0], col[1], col[2]);
+      const [ix, iy, iw, ih] = coverCrop(this.bgImageSize[0], this.bgImageSize[1], W, H);
+      gl.uniform4f(u.uBgCrop, ix, iy, iw, ih);
+    }
     gl.uniform4f(u.uCrop, cx, cy, cw, ch);
     gl.uniform2f(u.uTexel, 1 / srcW, 1 / srcH);
     gl.uniform1f(u.uExposure, a.exposure);
@@ -221,6 +395,6 @@ export class Grader {
     gl.uniform1f(u.uSharp, a.sharpness);
     gl.uniform1f(u.uSmooth, a.smoothing);
     gl.uniform1f(u.uVignette, a.vignette);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    this.#pass(this.main, null, W, H);
   }
 }
