@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que funcione sin conexión.
-const CACHE = 'teleclip-v5';
+const CACHE = 'teleclip-v6';
 const ASSETS = [
   './',
   'index.html',
@@ -11,6 +11,10 @@ const ASSETS = [
   'js/grade.js',
   'js/voice.js',
   'js/segment.js',
+  'js/timeline.js',
+  'js/render.js',
+  'js/player.js',
+  'js/editor.js',
   'vendor/mediabunny.min.mjs',
   'vendor/mediabunny-aac-encoder.min.mjs',
   'manifest.webmanifest',

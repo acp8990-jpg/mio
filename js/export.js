@@ -23,6 +23,8 @@ import {
   canEncodeAudio,
   QUALITY_HIGH,
 } from 'mediabunny';
+import { drawFrame, outputDims, fontFor } from './render.js';
+import { speechOut } from './timeline.js';
 
 /** Resoluciones de exportación: el número es el lado corto (720p, 1080p, 2K, 4K). */
 export const RESOLUTIONS = [
@@ -337,4 +339,271 @@ export async function joinClips(blobs, { resolution = 'original', onProgress } =
   }
   onProgress?.(0);
   return reencodeJoin(clips, resolution, onProgress);
+}
+
+// ================================================================ exportación con edición
+
+/** ¿La edición no cambia nada respecto a unir los clips tal cual? (permite la copia directa) */
+export function isPlainEdit(edit, project) {
+  const clipsTouched = Object.values(project.clips || {}).some((c) => c.trimIn != null || c.trimOut != null);
+  return (
+    !edit.captions.on && !edit.autoTrim && edit.silence === 'off' && edit.zoom === 'off' &&
+    edit.transition === 'corte' && edit.format === 'auto' && !edit.overlays.length && !edit.logo.assetId &&
+    !edit.progress.on && !edit.music.assetId && !edit.voice.enhance && !edit.voice.gate &&
+    edit.voice.volume === 1 && !edit.cover.firstFrame && !clipsTouched
+  );
+}
+
+async function openTake(cache, take) {
+  if (!cache.has(take.id)) {
+    const input = new Input({ source: new BlobSource(take.blob), formats: ALL_FORMATS });
+    const video = await input.getPrimaryVideoTrack();
+    const audio = await input.getPrimaryAudioTrack();
+    cache.set(take.id, { input, video, audio, t0: take.analysis?.t0 ?? (await input.getFirstTimestamp()) });
+  }
+  return cache.get(take.id);
+}
+
+/** Fotograma de una toma en un instante (relativo al inicio de la toma), como canvas. */
+export async function frameAt(take, rel, cache = new Map()) {
+  const inp = await openTake(cache, take);
+  const sink = new CanvasSink(inp.video, { poolSize: 1 });
+  const w = await sink.getCanvas(inp.t0 + Math.max(0, rel));
+  return w?.canvas ?? null;
+}
+
+/** Dibuja la portada: el fotograma elegido con su título (si lo hay). */
+export async function renderCover(ctx, W, H, { timeline, edit, images, cache }) {
+  const t = Math.min(edit.cover.time ?? 0, Math.max(0, timeline.duration - 0.05));
+  const piece = timeline.pieces.find((p) => t >= p.outStart && t < p.outEnd) || timeline.pieces[0];
+  const rel = piece.srcStart + (t - piece.outStart);
+  const src = await frameAt(piece.take, rel, cache);
+  drawFrame(ctx, W, H, {
+    source: src, srcW: src?.width, srcH: src?.height, t, piece, timeline,
+    edit: { ...edit, captions: { ...edit.captions, on: !edit.cover.title && edit.captions.on }, transition: 'corte' },
+    images,
+  });
+  const title = edit.cover.title?.trim();
+  if (title) {
+    const unit = Math.min(W, H);
+    const px = Math.round(unit * 0.1);
+    ctx.save();
+    ctx.font = fontFor(edit.captions.font, px);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    // Partir el título en líneas.
+    const words = title.toLocaleUpperCase('es').split(/\s+/);
+    const lines = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (ctx.measureText(test).width > W * 0.86 && line) {
+        lines.push(line);
+        line = w;
+      } else line = test;
+    }
+    lines.push(line);
+    const lh = px * 1.15;
+    lines.forEach((l, i) => {
+      const y = H * 0.5 + (i - (lines.length - 1) / 2) * lh;
+      ctx.lineWidth = px * 0.22;
+      ctx.strokeStyle = 'rgba(0,0,0,.9)';
+      ctx.strokeText(l, W / 2, y);
+      ctx.fillStyle = i % 2 ? edit.captions.accent : '#fff';
+      ctx.fillText(l, W / 2, y);
+    });
+    ctx.restore();
+  }
+}
+
+/** Mezcla todo el audio final: voz (con mejora y puerta de ruido) + música (con atenuación al hablar). */
+async function renderAudio({ timeline, edit, musicBlob, lead, cache }) {
+  const rate = 48000;
+  const total = timeline.duration + lead;
+  const ac = new OfflineAudioContext(2, Math.max(1, Math.ceil(total * rate)), rate);
+  const speech = speechOut(timeline).map(([a, b]) => [a + lead, b + lead]);
+
+  // Cadena de voz
+  const voiceIn = ac.createGain();
+  voiceIn.gain.value = edit.voice.volume;
+  let tail = voiceIn;
+  const chain = (node) => {
+    tail.connect(node);
+    tail = node;
+  };
+  if (edit.voice.enhance) {
+    const hp = ac.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 85;
+    chain(hp);
+    const mud = ac.createBiquadFilter();
+    mud.type = 'peaking';
+    mud.frequency.value = 300;
+    mud.Q.value = 1;
+    mud.gain.value = -2.5;
+    chain(mud);
+    const presence = ac.createBiquadFilter();
+    presence.type = 'peaking';
+    presence.frequency.value = 3200;
+    presence.Q.value = 0.9;
+    presence.gain.value = 3;
+    chain(presence);
+    const air = ac.createBiquadFilter();
+    air.type = 'highshelf';
+    air.frequency.value = 9000;
+    air.gain.value = 2;
+    chain(air);
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -26;
+    comp.knee.value = 6;
+    comp.ratio.value = 3.5;
+    comp.attack.value = 0.005;
+    comp.release.value = 0.18;
+    chain(comp);
+    const makeup = ac.createGain();
+    makeup.gain.value = 1.5;
+    chain(makeup);
+  }
+  if (edit.voice.gate) {
+    // Puerta de ruido: baja el fondo cuando no hablas.
+    const gate = ac.createGain();
+    const low = 0.18;
+    gate.gain.setValueAtTime(low, 0);
+    for (const [a, b] of speech) {
+      gate.gain.setTargetAtTime(1, Math.max(0, a - 0.04), 0.012);
+      gate.gain.setTargetAtTime(low, b + 0.08, 0.08);
+    }
+    chain(gate);
+  }
+  tail.connect(ac.destination);
+
+  for (const piece of timeline.pieces) {
+    const inp = await openTake(cache, piece.take);
+    if (!inp.audio || !(await inp.audio.canDecode())) continue;
+    const g = ac.createGain();
+    const ps = lead + piece.outStart;
+    const pe = lead + piece.outEnd;
+    const fade = Math.min(0.01, (pe - ps) / 4);
+    g.gain.setValueAtTime(0, ps);
+    g.gain.linearRampToValueAtTime(1, ps + fade);
+    g.gain.setValueAtTime(1, pe - fade);
+    g.gain.linearRampToValueAtTime(0, pe);
+    g.connect(voiceIn);
+    const sink = new AudioBufferSink(inp.audio);
+    for await (const { buffer, timestamp } of sink.buffers(inp.t0 + piece.srcStart, inp.t0 + piece.srcEnd)) {
+      const rel = timestamp - inp.t0;
+      const offset = Math.max(0, piece.srcStart - rel);
+      const dur = Math.min(buffer.duration - offset, piece.srcEnd - (rel + offset));
+      if (dur <= 0) continue;
+      const src = ac.createBufferSource();
+      src.buffer = buffer;
+      src.connect(g);
+      src.start(ps + (rel + offset - piece.srcStart), offset, dur);
+    }
+  }
+
+  if (musicBlob) {
+    const music = await ac.decodeAudioData(await musicBlob.arrayBuffer());
+    const src = ac.createBufferSource();
+    src.buffer = music;
+    src.loop = true;
+    const vol = ac.createGain();
+    const base = edit.music.volume;
+    vol.gain.setValueAtTime(base, 0);
+    if (edit.music.duck) {
+      // Atenuación: baja la música mientras hablas.
+      const merged = [];
+      for (const [a, b] of speech) {
+        const last = merged[merged.length - 1];
+        if (last && a - last[1] < 0.5) last[1] = b;
+        else merged.push([a, b]);
+      }
+      for (const [a, b] of merged) {
+        vol.gain.setTargetAtTime(base * 0.3, Math.max(0, a - 0.15), 0.07);
+        vol.gain.setTargetAtTime(base, b + 0.2, 0.3);
+      }
+    }
+    const fadeOut = ac.createGain();
+    const fo = Math.min(1.5, total / 3);
+    fadeOut.gain.setValueAtTime(1, Math.max(0, total - fo));
+    fadeOut.gain.linearRampToValueAtTime(0, total);
+    src.connect(vol);
+    vol.connect(fadeOut);
+    fadeOut.connect(ac.destination);
+    src.start(0);
+    src.stop(total);
+  }
+  return ac.startRendering();
+}
+
+/**
+ * Exporta el vídeo final con toda la edición a MP4.
+ * @param {{timeline, edit, images: Map, musicBlob: Blob|null, onProgress?: (p:number, stage:string)=>void}} o
+ */
+export async function exportEdited({ timeline, edit, images, musicBlob, onProgress }) {
+  if (!timeline.pieces.length) throw new Error('No hay clips que exportar.');
+  const cache = new Map();
+  const first = await openTake(cache, timeline.pieces[0].take);
+  const { width, height } = outputDims(first.video.displayWidth, first.video.displayHeight, edit.format, edit.resolution);
+  const bitrate = Math.round(width * height * 30 * 0.15);
+  const vCodec = await pickVideoCodec(width, height, bitrate);
+  const aCodec = (await ensureAac()) ? 'aac' : (await canEncodeAudio('opus')) ? 'opus' : null;
+  const lead = edit.cover.firstFrame ? 0.25 : 0;
+
+  onProgress?.(0, 'audio');
+  const audioBuffer = aCodec ? await renderAudio({ timeline, edit, musicBlob, lead, cache }) : null;
+
+  const dest = await createTarget();
+  const output = new Output({ format: new Mp4OutputFormat({ fastStart: dest.fastStart }), target: dest.target });
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const vSource = new CanvasSource(canvas, { codec: vCodec, bitrate, keyFrameInterval: 2 });
+  output.addVideoTrack(vSource);
+  let aSource = null;
+  if (audioBuffer) {
+    aSource = new AudioSampleSource({ codec: aCodec, bitrate: 192_000 });
+    output.addAudioTrack(aSource);
+  }
+  await output.start();
+
+  const total = timeline.duration + lead;
+  const audioJob = (async () => {
+    if (!aSource) return;
+    for (const sample of AudioSample.fromAudioBuffer(audioBuffer, 0)) {
+      await aSource.add(sample);
+      sample.close();
+    }
+  })();
+
+  const videoJob = (async () => {
+    let lastTs = -1;
+    if (lead) {
+      await renderCover(ctx, width, height, { timeline, edit, images, cache });
+      await vSource.add(0, lead);
+      lastTs = 0;
+    }
+    for (const piece of timeline.pieces) {
+      const inp = await openTake(cache, piece.take);
+      const sink = new CanvasSink(inp.video, { poolSize: 2 });
+      for await (const frame of sink.canvases(inp.t0 + piece.srcStart, inp.t0 + piece.srcEnd)) {
+        const rel = frame.timestamp - inp.t0;
+        const tOut = piece.outStart + Math.max(0, rel - piece.srcStart);
+        if (tOut >= piece.outEnd) break;
+        drawFrame(ctx, width, height, {
+          source: frame.canvas, srcW: frame.canvas.width, srcH: frame.canvas.height,
+          t: tOut, piece, timeline, edit, images,
+        });
+        const ts = Math.max(lastTs + 1 / 240, lead + tOut);
+        lastTs = ts;
+        await vSource.add(ts, Math.min(frame.duration || 1 / 30, 0.1));
+        onProgress?.(Math.min(1, ts / total), 'video');
+      }
+    }
+  })();
+
+  await Promise.all([videoJob, audioJob]);
+  await output.finalize();
+  const label = { avc: 'H.264', hevc: 'H.265', vp9: 'VP9', av1: 'AV1' }[vCodec];
+  return done(dest, `${label}${aCodec ? ' + ' + aCodec.toUpperCase() : ''}`, width, height);
 }

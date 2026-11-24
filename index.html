@@ -23,6 +23,16 @@
       <h1>TeleClip</h1>
       <span id="charCount" class="muted"></span>
     </header>
+    <div class="row project-row">
+      <select id="projectSel" aria-label="Proyecto"></select>
+      <button id="projectMenu" class="ghost" type="button" aria-label="Opciones del proyecto">⋯</button>
+    </div>
+    <div id="projectActions" class="row wrap" hidden>
+      <button id="projectNew" class="ghost" type="button">+ Nuevo vídeo</button>
+      <button id="projectRename" class="ghost" type="button">Renombrar</button>
+      <button id="projectDup" class="ghost" type="button">Duplicar guion</button>
+      <button id="projectDelete" class="ghost danger" type="button">Borrar</button>
+    </div>
 
     <textarea id="script" spellcheck="true" placeholder="Pega o escribe tu guion. Sin límite de caracteres.
 
@@ -199,15 +209,149 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
     </section>
   </main>
 
-  <!-- 3. CLIPS -->
-  <main id="view-clips" class="view" hidden>
+  <!-- 3. EDITOR -->
+  <main id="view-clips" class="view editor" hidden>
     <header class="bar">
-      <h1>Clips</h1>
-      <button id="clearAll" class="ghost danger" type="button">Borrar todos</button>
+      <h1>Editar</h1>
+      <span id="edDuration" class="muted"></span>
     </header>
-    <ol id="clipList" class="clip-list"></ol>
 
-    <section class="export">
+    <div class="ed-stage">
+      <canvas id="edCanvas" aria-label="Vista previa del vídeo editado"></canvas>
+      <div id="edEmpty" class="ed-empty" hidden>Graba algún clip para empezar a editar.</div>
+      <div id="edBusy" class="ed-busy" hidden></div>
+    </div>
+    <div class="ed-transport">
+      <button id="edPlay" class="icon-btn" type="button" aria-label="Reproducir">▶</button>
+      <input id="edSeek" type="range" min="0" max="1000" step="1" value="0" aria-label="Posición">
+      <span id="edTime" class="muted mono">00:00 / 00:00</span>
+    </div>
+
+    <div class="ed-tabs" role="tablist">
+      <button type="button" data-etab="clips" class="active">Clips</button>
+      <button type="button" data-etab="subs">Subtítulos</button>
+      <button type="button" data-etab="fx">Efectos</button>
+      <button type="button" data-etab="audio">Audio</button>
+      <button type="button" data-etab="items">Elementos</button>
+      <button type="button" data-etab="export">Exportar</button>
+    </div>
+
+    <section class="ed-panel" data-epanel="clips">
+      <label class="check"><input id="edAutoTrim" type="checkbox"> Recortar solo el principio y el final de cada clip</label>
+      <label class="field"><span>Quitar silencios</span>
+        <select id="edSilence">
+          <option value="off">No</option>
+          <option value="suave">Suave (solo las pausas largas)</option>
+          <option value="fuerte">Fuerte (ritmo rápido, cortes seguidos)</option>
+        </select></label>
+      <ol id="clipList" class="clip-list"></ol>
+      <button id="clearAll" class="ghost danger" type="button">Borrar todas las tomas</button>
+    </section>
+
+    <section class="ed-panel" data-epanel="subs" hidden>
+      <label class="check"><input id="capOn" type="checkbox"> Subtítulos automáticos</label>
+      <div class="chips" id="capStyles">
+        <button type="button" data-style="resaltado">Resaltado</button>
+        <button type="button" data-style="karaoke">Karaoke</button>
+        <button type="button" data-style="grande">Grande</button>
+        <button type="button" data-style="clasico">Clásico</button>
+      </div>
+      <label class="field"><span>Letra</span>
+        <select id="capFont">
+          <option value="sans">Moderna</option>
+          <option value="redondeada">Redondeada</option>
+          <option value="condensada">Estrecha</option>
+          <option value="serif">Clásica (serif)</option>
+        </select></label>
+      <label class="slider"><span>Tamaño <b id="capSizeVal"></b></span><input id="capSize" type="range" min="50" max="180" step="5"></label>
+      <label class="slider"><span>Posición vertical <b id="capPosVal"></b></span><input id="capPos" type="range" min="5" max="95" step="1"></label>
+      <label class="slider"><span>Palabras por frase <b id="capWordsVal"></b></span><input id="capWords" type="range" min="1" max="8" step="1"></label>
+      <label class="check"><input id="capUpper" type="checkbox"> En mayúsculas</label>
+      <div class="row colors">
+        <label class="color"><input id="capColor" type="color"> Texto</label>
+        <label class="color"><input id="capAccent" type="color"> Destacado</label>
+      </div>
+      <p class="muted small">Los subtítulos usan el texto de tu guion, sincronizado con tu voz. Puedes corregir el texto de cada clip en la pestaña Clips.</p>
+    </section>
+
+    <section class="ed-panel" data-epanel="fx" hidden>
+      <label class="field"><span>Zoom</span>
+        <select id="fxZoom">
+          <option value="off">Sin zoom</option>
+          <option value="alterno">Alternar en cada corte (dinámico)</option>
+          <option value="acercar">Acercar poco a poco</option>
+        </select></label>
+      <label class="field"><span>Transición entre clips</span>
+        <select id="fxTransition">
+          <option value="corte">Corte directo</option>
+          <option value="fundido">Fundido a negro</option>
+          <option value="flash">Destello blanco</option>
+          <option value="zoom">Zoom rápido</option>
+        </select></label>
+      <label class="field"><span>Formato</span>
+        <select id="fxFormat">
+          <option value="auto">Como se grabó</option>
+          <option value="9:16">Vertical 9:16 (TikTok, Reels, Shorts)</option>
+          <option value="4:5">4:5 (publicación de Instagram)</option>
+          <option value="1:1">Cuadrado 1:1</option>
+          <option value="16:9">Horizontal 16:9 (YouTube)</option>
+        </select></label>
+      <label class="slider" id="fxReframeField"><span>Encuadre (si el formato recorta) <b id="fxReframeVal"></b></span>
+        <input id="fxReframe" type="range" min="0" max="100" step="1"></label>
+    </section>
+
+    <section class="ed-panel" data-epanel="audio" hidden>
+      <h3 class="sub">Música de fondo</h3>
+      <div class="row wrap">
+        <button id="musicPick" class="ghost" type="button">Elegir canción…</button>
+        <input id="musicFile" type="file" accept="audio/*" hidden>
+        <span id="musicName" class="muted"></span>
+        <button id="musicRemove" class="ghost danger" type="button" hidden>Quitar</button>
+      </div>
+      <label class="slider"><span>Volumen de la música <b id="musicVolVal"></b></span><input id="musicVol" type="range" min="0" max="100" step="1"></label>
+      <label class="check"><input id="musicDuck" type="checkbox"> Bajar la música cuando hablo</label>
+      <h3 class="sub">Voz</h3>
+      <label class="check"><input id="voiceEnhance" type="checkbox"> Mejorar la voz (ecualizador y compresor)</label>
+      <label class="check"><input id="voiceGate" type="checkbox"> Silenciar el ruido entre frases</label>
+      <label class="slider"><span>Volumen de la voz <b id="voiceVolVal"></b></span><input id="voiceVol" type="range" min="0" max="200" step="5"></label>
+      <p class="muted small">La mejora de voz se aplica al exportar; en la vista previa se oye la voz original.</p>
+    </section>
+
+    <section class="ed-panel" data-epanel="items" hidden>
+      <div class="row wrap">
+        <button id="addText" class="ghost" type="button">+ Texto</button>
+        <button id="addEmoji" class="ghost" type="button">+ Emoji</button>
+        <button id="addImage" class="ghost" type="button">+ Imagen</button>
+        <input id="imageFile" type="file" accept="image/*" hidden>
+      </div>
+      <p class="muted small">Arrastra los elementos sobre la vista previa para colocarlos.</p>
+      <ol id="overlayList" class="overlay-list"></ol>
+      <h3 class="sub">Logo o marca de agua</h3>
+      <div class="row wrap">
+        <button id="logoPick" class="ghost" type="button">Elegir logo…</button>
+        <input id="logoFile" type="file" accept="image/*" hidden>
+        <button id="logoRemove" class="ghost danger" type="button" hidden>Quitar</button>
+      </div>
+      <div id="logoOpts" class="tab-panel" hidden>
+        <label class="field"><span>Esquina</span>
+          <select id="logoCorner">
+            <option value="tr">Arriba a la derecha</option>
+            <option value="tl">Arriba a la izquierda</option>
+            <option value="br">Abajo a la derecha</option>
+            <option value="bl">Abajo a la izquierda</option>
+          </select></label>
+        <label class="slider"><span>Tamaño <b id="logoSizeVal"></b></span><input id="logoSize" type="range" min="5" max="40" step="1"></label>
+        <label class="slider"><span>Opacidad <b id="logoOpVal"></b></span><input id="logoOp" type="range" min="10" max="100" step="5"></label>
+      </div>
+      <h3 class="sub">Barra de progreso</h3>
+      <label class="check"><input id="progOn" type="checkbox"> Mostrar barra de progreso</label>
+      <div class="row wrap">
+        <label class="color"><input id="progColor" type="color"> Color</label>
+        <select id="progPos"><option value="bottom">Abajo</option><option value="top">Arriba</option></select>
+      </div>
+    </section>
+
+    <section class="ed-panel export" data-epanel="export" hidden>
       <label class="field">
         <span>Resolución del vídeo final (MP4)</span>
         <select id="exportRes">
@@ -218,7 +362,15 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
           <option value="2160">2160p · 4K</option>
         </select>
       </label>
-      <button id="exportBtn" class="primary big" type="button">Unir clips y exportar</button>
+      <h3 class="sub">Portada</h3>
+      <div class="row wrap">
+        <button id="coverHere" class="ghost" type="button">Usar este momento como portada</button>
+        <span id="coverTime" class="muted"></span>
+      </div>
+      <label class="field"><span>Título de la portada (opcional)</span><input id="coverTitle" type="text" maxlength="80" placeholder="Ej.: 3 trucos para grabar mejor"></label>
+      <label class="check"><input id="coverFirst" type="checkbox"> Poner la portada al principio del vídeo (para que se vea en el perfil)</label>
+      <button id="coverDownload" class="ghost" type="button">Descargar portada (JPG)</button>
+      <button id="exportBtn" class="primary big" type="button">Exportar vídeo</button>
       <div id="exportProgress" class="progress" hidden><div></div></div>
       <p id="exportStatus" class="muted"></p>
       <div id="exportResult" hidden>
@@ -233,7 +385,7 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
 
   <nav id="tabs" class="tabs">
     <button data-view="script" class="active" type="button">Guion</button>
-    <button data-view="clips" type="button">Clips <span id="clipBadge" class="badge" hidden></span></button>
+    <button data-view="clips" type="button">Editar <span id="clipBadge" class="badge" hidden></span></button>
   </nav>
 
   <div id="toast" class="toast" role="status" hidden></div>
