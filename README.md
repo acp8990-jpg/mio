@@ -16,12 +16,16 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
      - *A velocidad fija*.
    - **Vertical 9:16 u horizontal 16:9**: botón de formato arriba, o ⚙ → Grabación. La vista previa muestra
      exactamente el encuadre que se graba.
+   - **Toca la imagen para enfocar** (y exponer) en ese punto; **mantén pulsado** para bloquear enfoque y
+     exposición (aparece «AF bloqueado»). Funciona en Android con Chrome; en iPhone el navegador no lo permite
+     y el enfoque es siempre automático.
    - Toca el texto para pausar o reanudar. Arrástralo para colocarlo a mano y la lectura se resincroniza.
    - ▶ ensaya sin grabar. ⏮ ⏭ cambian de fragmento. ⟲ cambia de cámara.
    - ⚙ tiene cuatro pestañas:
      - **Texto**: velocidad, tamaño, alto y fondo, espejo, cuenta atrás, avanzar o parar solo.
      - **Voz**: modo, idioma del guion, sensibilidad del micrófono con medidor.
-     - **Imagen**: estilos (Natural, Vivo, Cálido, Frío, Retrato, Cine, B/N) y ajustes de exposición, brillo,
+     - **Imagen**: **desenfoque de fondo** (barra de 0 a 100: detecta a la persona con MediaPipe y difumina el
+       resto; el modelo se descarga solo la primera vez, ~15 MB), **enfoque** automático o bloqueado, estilos (Natural, Vivo, Cálido, Frío, Retrato, Cine, B/N) y ajustes de exposición, brillo,
        contraste, luces, sombras, saturación, intensidad, temperatura, tinte, nitidez, suavizado de piel y viñeta.
        Más los controles propios de la cámara si el móvil los ofrece (zoom, exposición, balance de blancos,
        enfoque manual, linterna).
@@ -52,6 +56,8 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
 | Cámara y micrófono | `getUserMedia` |
 | Encuadre y color | La cámara se dibuja en un canvas del tamaño exacto (p. ej. 1080×1920) y un shader WebGL aplica la corrección de color en la GPU. Se graba ese canvas: lo que ves es lo que se graba |
 | Grabación de cada clip | `MediaRecorder`: MP4 H.264 si el navegador lo permite (iPhone, Chrome reciente) y si no WebM |
+| Fondo desenfocado | MediaPipe Selfie Segmenter (Apache-2.0, en `vendor/mediapipe/`) + desenfoque gaussiano en varias pasadas en la GPU |
+| Enfoque por toque | `pointsOfInterest` / `focusMode` de MediaStreamTrack (Image Capture) |
 | Seguir la voz | Web Speech API + alineación tolerante a errores con el guion (`js/voice.js`); plan B por nivel del micrófono |
 | Almacenamiento | IndexedDB para los clips y `localStorage` para el guion y los ajustes |
 | Unir, reescalar y exportar a MP4 | [Mediabunny](https://github.com/Vanilagy/mediabunny) + `@mediabunny/aac-encoder` (MPL-2.0, incluidas en `vendor/`), sobre WebCodecs |

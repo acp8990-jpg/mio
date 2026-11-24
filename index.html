@@ -74,6 +74,8 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
       <button id="openSettings" class="icon" type="button" aria-label="Ajustes">⚙</button>
     </div>
 
+    <div id="focusRing" class="focus-ring" hidden></div>
+    <div id="focusBadge" class="focus-badge" hidden>AF bloqueado</div>
     <div id="countdown" class="countdown" hidden></div>
     <div id="camError" class="cam-error" hidden></div>
     <div id="rotateHint" class="rotate-hint" hidden>Gira el móvil para grabar en horizontal con toda la calidad</div>
@@ -145,6 +147,16 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
       </div>
 
       <div class="tab-panel" data-panel="image" hidden>
+        <label class="slider"><span>Desenfoque de fondo <b id="bgBlurVal"></b></span>
+          <input id="bgBlur" type="range" min="0" max="100" step="1"></label>
+        <p id="bgBlurStatus" class="muted small"></p>
+        <div class="field"><span>Enfoque</span>
+          <div class="seg-toggle" id="focusToggle">
+            <button type="button" data-focus="auto">Automático</button>
+            <button type="button" data-focus="lock">Bloqueado</button>
+          </div></div>
+        <p id="focusHelp" class="muted small">Toca la imagen para enfocar ahí. Mantén pulsado para bloquear el enfoque.</p>
+        <h3 class="sub">Color</h3>
         <div class="chips" id="presets"></div>
         <div id="adjustSliders"></div>
         <button id="resetAdjust" class="ghost" type="button">Restablecer imagen</button>

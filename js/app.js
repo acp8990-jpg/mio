@@ -29,6 +29,7 @@ const DEFAULTS = {
   voiceSens: 50,
   adjust: {},
   preset: 'natural',
+  bgBlur: 0,
   exportRes: 1080,
   mirror: false,
   autoAdvance: true,
@@ -380,6 +381,15 @@ function buildImagePanel() {
     wrap.append(head, input);
     box.append(wrap);
   }
+  const blur = $('bgBlur');
+  blur.value = String(Math.round(state.settings.bgBlur * 100));
+  blur.addEventListener('input', () => {
+    setSetting('bgBlur', Number(blur.value) / 100);
+    applyBackgroundBlur();
+  });
+  document.querySelectorAll('#focusToggle button').forEach((b) =>
+    b.addEventListener('click', () => (b.dataset.focus === 'lock' ? lockFocus() : unlockFocus())),
+  );
   $('resetAdjust').addEventListener('click', () => {
     setSetting('adjust', { ...ADJUST_DEFAULTS });
     setSetting('preset', 'natural');
@@ -398,6 +408,142 @@ function syncImagePanel() {
   document.querySelectorAll('#presets button').forEach((b) =>
     b.classList.toggle('active', b.dataset.preset === state.settings.preset),
   );
+  const bb = Math.round(state.settings.bgBlur * 100);
+  $('bgBlur').value = String(bb);
+  $('bgBlurVal').textContent = bb ? String(bb) : 'No';
+}
+
+// ---------------------------------------------------------------- fondo desenfocado
+
+let blurLoadToken = 0;
+async function applyBackgroundBlur() {
+  const amount = state.settings.bgBlur;
+  $('bgBlurVal').textContent = amount ? String(Math.round(amount * 100)) : 'No';
+  const status = $('bgBlurStatus');
+  if (!camera.grader.usesGpu) {
+    status.textContent = 'Este dispositivo no admite el desenfoque de fondo (necesita WebGL).';
+    return;
+  }
+  if (amount > 0 && !camera.mask.ready) {
+    const token = ++blurLoadToken;
+    status.textContent = 'Preparando el desenfoque (solo la primera vez, ~15 MB)…';
+    try {
+      await camera.setBackgroundBlur(amount);
+      if (token === blurLoadToken) status.textContent = 'Fondo desenfocado: detecta a la persona y difumina el resto.';
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'No se pudo activar el desenfoque de fondo en este dispositivo.';
+      camera.bgBlur = 0;
+    }
+    return;
+  }
+  camera.setBackgroundBlur(amount);
+  status.textContent = amount > 0 ? 'Fondo desenfocado: detecta a la persona y difumina el resto.' : '';
+}
+
+// ---------------------------------------------------------------- enfoque
+
+state.focusLocked = false;
+let focusWarned = false;
+
+function showFocusRing(x, y, locked) {
+  const ring = $('focusRing');
+  ring.hidden = true;
+  ring.classList.toggle('locked', locked);
+  ring.style.left = `${x}px`;
+  ring.style.top = `${y}px`;
+  void ring.offsetWidth; // reinicia la animación
+  ring.hidden = false;
+  clearTimeout(showFocusRing.t);
+  if (!locked) showFocusRing.t = setTimeout(() => (ring.hidden = true), 1400);
+}
+
+function syncFocusUi() {
+  $('focusBadge').hidden = !state.focusLocked;
+  document.querySelectorAll('#focusToggle button').forEach((b) =>
+    b.classList.toggle('active', (b.dataset.focus === 'lock') === state.focusLocked),
+  );
+  const f = camera.focusSupport();
+  $('focusHelp').textContent = !f.modes.length
+    ? 'Este navegador no deja controlar el enfoque (en iPhone siempre es automático). Toca la imagen igualmente: en Android con Chrome sí funciona.'
+    : f.point
+      ? 'Toca la imagen para enfocar ahí. Mantén pulsado para bloquear el enfoque.'
+      : 'Toca la imagen para volver a enfocar. Mantén pulsado para bloquear el enfoque.';
+}
+
+async function lockFocus(x, y) {
+  if (await camera.lockFocus()) {
+    state.focusLocked = true;
+    if (x !== undefined) showFocusRing(x, y, true);
+    toast('Enfoque y exposición bloqueados');
+  } else toast('Esta cámara no permite bloquear el enfoque');
+  syncFocusUi();
+}
+
+async function unlockFocus() {
+  state.focusLocked = false;
+  $('focusRing').hidden = true;
+  await camera.focusAuto();
+  syncFocusUi();
+}
+
+/** Convierte un toque en pantalla a coordenadas 0..1 del encuadre grabado (canvas con object-fit: contain). */
+function tapToFrame(clientX, clientY) {
+  const el = $('preview');
+  const r = el.getBoundingClientRect();
+  const cw = el.width;
+  const ch = el.height;
+  const scale = Math.min(r.width / cw, r.height / ch);
+  const w = cw * scale;
+  const h = ch * scale;
+  let u = (clientX - r.left - (r.width - w) / 2) / w;
+  const v = (clientY - r.top - (r.height - h) / 2) / h;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+  if (state.settings.facing === 'user') u = 1 - u; // la vista previa frontal va en espejo
+  return { u, v };
+}
+
+{
+  const preview = $('preview');
+  let pressTimer = 0;
+  let start = null;
+  preview.addEventListener('pointerdown', (e) => {
+    start = { x: e.clientX, y: e.clientY, long: false };
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      if (!start) return;
+      start.long = true;
+      const { x, y } = start;
+      const p = tapToFrame(x, y);
+      if (!p) return;
+      // Enfoca en ese punto, deja que la cámara ajuste y bloquea.
+      showFocusRing(x, y, false);
+      camera.focusAt(p.u, p.v).then(() => setTimeout(() => lockFocus(x, y), 600));
+    }, 600);
+  });
+  preview.addEventListener('pointerup', async (e) => {
+    clearTimeout(pressTimer);
+    if (!start || start.long || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+      start = null;
+      return;
+    }
+    start = null;
+    if (!$('settings').hidden && !$('settings').classList.contains('compact')) return;
+    const p = tapToFrame(e.clientX, e.clientY);
+    if (!p) return;
+    state.focusLocked = false;
+    showFocusRing(e.clientX, e.clientY, false);
+    const result = await camera.focusAt(p.u, p.v);
+    syncFocusUi();
+    if (result === 'unsupported' && !focusWarned) {
+      focusWarned = true;
+      toast('Tu navegador no deja elegir el punto de enfoque; la cámara enfoca sola');
+    }
+  });
+  preview.addEventListener('pointercancel', () => {
+    clearTimeout(pressTimer);
+    start = null;
+  });
 }
 
 /** Controles propios de la cámara del móvil (solo los que el dispositivo admite). */
@@ -515,6 +661,9 @@ async function startCamera() {
     });
     camera.setAdjust(s.adjust);
     renderHardware();
+    state.focusLocked = false;
+    syncFocusUi();
+    if (s.bgBlur > 0) applyBackgroundBlur();
   } catch (err) {
     console.error(err);
     const el = $('camError');
