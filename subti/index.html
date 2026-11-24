@@ -236,9 +236,29 @@
       <li><svg><use href="#i-check"/></svg>Exportación en 4K</li>
       <li><svg><use href="#i-check"/></svg>Transcripción de máxima precisión</li>
     </ul>
-    <div class="plans" id="plans"></div>
-    <button class="btn btn-brand btn-xl btn-block" id="proGo">Probar 7 días gratis</button>
-    <p class="fine center" id="proFine">Cancela cuando quieras.</p>
+    <div id="proBuy">
+      <div class="plans" id="plans"></div>
+      <button class="btn btn-brand btn-xl btn-block" id="proGo">Probar 7 días gratis</button>
+      <button class="btn btn-ghost btn-block pro-trial" id="proTrial" hidden>Probar 7 días gratis</button>
+      <p class="fine center" id="proFine">Cancela cuando quieras.</p>
+      <button class="link-btn" id="keyToggle">¿Ya tienes una clave de licencia?</button>
+      <form class="key-form" id="keyForm" hidden>
+        <label for="keyInput">Pega la clave que te llegó por email al suscribirte</label>
+        <div class="key-row">
+          <input id="keyInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX">
+          <button class="btn btn-soft" id="keyGo" type="submit">Activar</button>
+        </div>
+        <p class="key-error" id="keyError" role="alert" hidden></p>
+      </form>
+    </div>
+    <div id="proHave" hidden>
+      <div class="have-card">
+        <svg><use href="#i-check"/></svg>
+        <div><b id="haveTitle">Tienes Subti Pro</b><span id="haveSub"></span></div>
+      </div>
+      <a class="btn btn-soft btn-lg btn-block" id="portalBtn" target="_blank" rel="noopener">Gestionar suscripción</a>
+      <button class="link-btn danger" id="unlinkKey">Quitar Pro de este dispositivo</button>
+    </div>
   </section>
 
   <div class="toast" id="toast" role="status" hidden></div>

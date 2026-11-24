@@ -1,5 +1,5 @@
 // Service worker: la app funciona sin conexión y recibe vídeos compartidos desde la galería.
-const CACHE = 'subti-v1';
+const CACHE = 'subti-v2';
 const ASSETS = [
   './', 'index.html', 'css/subti.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/main.js', 'js/captions.js', 'js/transcribe.js', 'js/worker.js', 'js/render.js', 'js/db.js', 'js/plan.js',

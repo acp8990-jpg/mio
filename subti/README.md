@@ -58,9 +58,13 @@ python3 -m http.server 8000
 Hace falta conexión la primera vez para descargar el modelo de voz (≈80 MB desde huggingface.co y el motor
 WebAssembly desde cdn.jsdelivr.net).
 
-## Pendiente antes de cobrar
+## Pagos
 
-- **Pagos**: rellenar `CHECKOUT` en `js/plan.js` (Stripe Payment Links, Lemon Squeezy o Paddle) y validar la compra
-  en un servidor o con licencias firmadas. Ahora «Probar 7 días gratis» activa una prueba local.
+Suscripciones con **Lemon Squeezy** y claves de licencia comprobadas desde la app (sin servidor).
+Guía para activarlo: [PAGOS.md](PAGOS.md). Configuración en `js/plan.js` (`LEMON`); proxy opcional en
+`server/license-proxy.js`.
+
+## Pendiente
+
 - Analítica mínima (embudo: vídeo elegido → transcrito → exportado → Pro).
 - Más estilos, emojis automáticos y palabras clave resaltadas con IA.
