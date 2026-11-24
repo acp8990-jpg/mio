@@ -1,5 +1,5 @@
 // Service worker: la app funciona sin conexión y recibe vídeos compartidos desde la galería.
-const CACHE = 'subti-v2';
+const CACHE = 'subti-v4';
 const ASSETS = [
   './', 'index.html', 'css/subti.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/main.js', 'js/captions.js', 'js/transcribe.js', 'js/worker.js', 'js/render.js', 'js/db.js', 'js/plan.js',
@@ -8,6 +8,8 @@ const ASSETS = [
   'fonts/manrope-latin-600-normal.woff2', 'fonts/manrope-latin-800-normal.woff2', 'fonts/space-grotesk-latin-700-normal.woff2',
   'fonts/jetbrains-mono-latin-700-normal.woff2',
   '../vendor/mediabunny.min.mjs', '../vendor/mediabunny-aac-encoder.min.mjs',
+  'js/record.js', '../js/camera.js', '../js/grade.js', '../js/segment.js', '../js/voice.js', '../js/export.js',
+  '../js/render.js', '../js/timeline.js',
 ];
 
 self.addEventListener('install', (e) => {
