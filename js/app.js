@@ -30,6 +30,7 @@ const DEFAULTS = {
   adjust: {},
   preset: 'natural',
   bgBlur: 0,
+  boxPos: {}, // posición del texto por orientación de pantalla: { portrait: {x,y,w}, landscape: {...} } en %
   exportRes: 1080,
   mirror: false,
   autoAdvance: true,
@@ -195,6 +196,7 @@ function applySettings() {
   $('speedVal').textContent = s.speed;
   $('fontVal').textContent = `${s.fontSize}px`;
   $('heightVal').textContent = `${s.boxHeight}%`;
+  $('boxHeight').value = String(s.boxHeight);
   $('opacityVal').textContent = `${s.bgOpacity}%`;
   $('preview').classList.toggle('mirror', s.facing === 'user');
 
@@ -852,6 +854,95 @@ scroller.addEventListener('pointerup', (e) => {
   }, 120);
 });
 
+// ---------------------------------------------------------------- mover / redimensionar el texto
+
+const prompterEl = $('prompter');
+const screenKey = () => (innerHeight >= innerWidth ? 'portrait' : 'landscape');
+const clamp = (v, min, max) => Math.min(Math.max(v, min), Math.max(min, max));
+
+/** Coloca el cuadro según lo guardado para esta orientación de pantalla (o la posición por defecto). */
+function applyBoxPos() {
+  const pos = state.settings.boxPos?.[screenKey()];
+  const st = prompterEl.style;
+  if (!pos) {
+    st.left = st.top = st.width = st.right = '';
+    return;
+  }
+  const W = innerWidth;
+  const H = innerHeight;
+  const w = clamp((pos.w / 100) * W, 140, W);
+  const h = prompterEl.offsetHeight;
+  st.right = 'auto';
+  st.width = `${w}px`;
+  st.left = `${clamp((pos.x / 100) * W, 0, W - w)}px`;
+  st.top = `${clamp((pos.y / 100) * H, 0, H - Math.min(h, H))}px`;
+}
+
+function saveBoxPos() {
+  const r = prompterEl.getBoundingClientRect();
+  const W = innerWidth;
+  const H = innerHeight;
+  setSetting('boxPos', {
+    ...state.settings.boxPos,
+    [screenKey()]: { x: (r.left / W) * 100, y: (r.top / H) * 100, w: (r.width / W) * 100 },
+  });
+}
+
+function dragBehaviour(handle, onMove) {
+  let start = null;
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    const r = prompterEl.getBoundingClientRect();
+    start = { x: e.clientX, y: e.clientY, left: r.left, top: r.top, w: r.width, h: r.height };
+    prompterEl.classList.add('moving');
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    onMove(start, e.clientX - start.x, e.clientY - start.y);
+  });
+  const end = () => {
+    if (!start) return;
+    start = null;
+    prompterEl.classList.remove('moving');
+    saveBoxPos();
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
+}
+
+// Asa superior: mover a cualquier sitio de la pantalla.
+dragBehaviour($('dragHandle'), (s, dx, dy) => {
+  const st = prompterEl.style;
+  st.right = 'auto';
+  st.width = `${s.w}px`;
+  st.left = `${clamp(s.left + dx, 0, innerWidth - s.w)}px`;
+  st.top = `${clamp(s.top + dy, 0, innerHeight - s.h)}px`;
+});
+
+// Esquina inferior derecha: ancho y alto.
+dragBehaviour($('resizeHandle'), (s, dx, dy) => {
+  const st = prompterEl.style;
+  st.right = 'auto';
+  st.left = `${s.left}px`;
+  st.top = `${s.top}px`;
+  st.width = `${clamp(s.w + dx, 140, innerWidth - s.left)}px`;
+  const h = clamp(s.h + dy, innerHeight * 0.12, Math.min(innerHeight * 0.95, innerHeight - s.top));
+  state.settings.boxHeight = Math.round((h / innerHeight) * 100);
+  prompterEl.style.setProperty('--box-h', `${state.settings.boxHeight}vh`);
+  $('heightVal').textContent = `${state.settings.boxHeight}%`;
+});
+
+$('resetBox').addEventListener('click', () => {
+  setSetting('boxPos', { ...state.settings.boxPos, [screenKey()]: undefined });
+  setSetting('boxHeight', DEFAULTS.boxHeight);
+  applyBoxPos();
+  toast('Texto colocado en su sitio de siempre');
+});
+
+addEventListener('resize', applyBoxPos);
+
 // ---------------------------------------------------------------- seguir la voz
 
 const level = new LevelFollower({
@@ -1077,7 +1168,16 @@ async function openRecorder(i) {
   if (!state.segments.length) return;
   showView('record');
   applySettings();
+  applyBoxPos();
   loadSegment(i);
+  try {
+    if (!localStorage.getItem('teleclip.hint.box')) {
+      localStorage.setItem('teleclip.hint.box', '1');
+      toast('Arrastra la barrita de arriba del texto para moverlo, y la esquina para cambiar su tamaño');
+    }
+  } catch {
+    /* sin almacenamiento */
+  }
   await startCamera();
   keepAwake(true);
 }

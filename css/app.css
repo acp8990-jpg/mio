@@ -128,7 +128,7 @@ textarea#script:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   border: 6px solid transparent; border-left: 9px solid var(--accent-2);
 }
 .paused-badge {
-  position: absolute; right: 10px; bottom: 10px; background: rgba(0,0,0,.7);
+  position: absolute; left: 10px; bottom: 10px; background: rgba(0,0,0,.7);
   font-size: .8rem; padding: 4px 10px; border-radius: 999px; pointer-events: none;
 }
 
@@ -278,3 +278,19 @@ button.icon.pill.on { background: rgba(46, 230, 197, .25); }
   position: absolute; z-index: 3; left: 50%; transform: translateX(-50%); bottom: calc(118px + var(--safe-bottom));
   background: #ff9f1a; color: #111; font-weight: 600; font-size: .8rem; padding: 4px 10px; border-radius: 999px;
 }
+
+/* ---------- mover y redimensionar el texto ---------- */
+.drag-handle {
+  position: absolute; z-index: 2; top: 0; left: 50%; transform: translateX(-50%);
+  width: 96px; height: 26px; display: grid; place-items: center; cursor: grab; touch-action: none;
+}
+.drag-handle span { width: 44px; height: 5px; border-radius: 999px; background: rgba(255,255,255,.75); box-shadow: 0 0 4px #000; }
+.resize-handle {
+  position: absolute; z-index: 2; right: 0; bottom: 0; width: 34px; height: 34px; cursor: nwse-resize; touch-action: none;
+}
+.resize-handle::after {
+  content: ""; position: absolute; right: 7px; bottom: 7px; width: 13px; height: 13px;
+  border-right: 3px solid rgba(255,255,255,.8); border-bottom: 3px solid rgba(255,255,255,.8); border-radius: 0 0 4px 0;
+}
+.prompter.moving { outline: 2px dashed var(--accent-2); outline-offset: 2px; }
+.prompter.moving .drag-handle { cursor: grabbing; }

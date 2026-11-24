@@ -60,6 +60,8 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
       </div>
       <div class="reading-line" aria-hidden="true"></div>
       <div id="pausedBadge" class="paused-badge" hidden>Pausa · toca para seguir</div>
+      <div id="dragHandle" class="drag-handle" role="button" aria-label="Mover el texto" title="Arrastra para mover"><span></span></div>
+      <div id="resizeHandle" class="resize-handle" role="button" aria-label="Cambiar el tamaño del texto" title="Arrastra para cambiar el tamaño"></div>
       <div id="voiceBadge" class="voice-badge" hidden><span class="dot"></span><span id="voiceBadgeText"></span></div>
     </div>
 
@@ -105,7 +107,7 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
         <label class="slider"><span>Tamaño de letra <b id="fontVal"></b></span>
           <input id="fontSize" type="range" min="18" max="80" step="1"></label>
         <label class="slider"><span>Alto del texto <b id="heightVal"></b></span>
-          <input id="boxHeight" type="range" min="20" max="90" step="1"></label>
+          <input id="boxHeight" type="range" min="12" max="95" step="1"></label>
         <label class="slider"><span>Fondo del texto <b id="opacityVal"></b></span>
           <input id="bgOpacity" type="range" min="0" max="100" step="5"></label>
         <label class="field"><span>Cuenta atrás</span>
@@ -114,6 +116,7 @@ Deja una línea en blanco entre párrafos: cada párrafo será un clip."></texta
             <option value="3">3 segundos</option>
             <option value="5">5 segundos</option>
           </select></label>
+        <button id="resetBox" class="ghost" type="button">Volver a colocar el texto arriba</button>
         <label class="check"><input id="mirror" type="checkbox"> Texto en espejo (para cristal de teleprompter)</label>
         <label class="check"><input id="autoAdvance" type="checkbox"> Pasar al siguiente clip al parar</label>
         <label class="check"><input id="autoStop" type="checkbox"> Parar la grabación al acabar el texto</label>

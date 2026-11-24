@@ -19,6 +19,9 @@ Es una app web instalable (PWA): funciona en Android y iPhone, sin servidores. L
    - **Toca la imagen para enfocar** (y exponer) en ese punto; **mantén pulsado** para bloquear enfoque y
      exposición (aparece «AF bloqueado»). Funciona en Android con Chrome; en iPhone el navegador no lo permite
      y el enfoque es siempre automático.
+   - **Mueve el cuadro de texto** arrastrando la barrita de arriba, y **cambia su tamaño** con la esquina inferior
+     derecha. Se recuerda por separado con el móvil en vertical y en horizontal (⚙ → Texto → «Volver a colocar
+     el texto arriba» lo devuelve a su sitio).
    - Toca el texto para pausar o reanudar. Arrástralo para colocarlo a mano y la lectura se resincroniza.
    - ▶ ensaya sin grabar. ⏮ ⏭ cambian de fragmento. ⟲ cambia de cámara.
    - ⚙ tiene cuatro pestañas:
