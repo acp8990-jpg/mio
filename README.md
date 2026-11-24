@@ -1,3 +1,5 @@
+> **Nuevo:** [Subti](subti/), subtítulos animados automáticos (freemium). Ver `subti/README.md`.
+
 # TeleClip
 
 Teleprompter **sin límite de caracteres** que **graba clip a clip** y une los clips en el propio móvil.
