@@ -4,7 +4,10 @@ import {
 import { extractAudio, transcribe, cancelTranscription } from './transcribe.js';
 import { probe, exportVideo, thumbnail } from './render.js';
 import { saveProject, getProject, deleteProject, listProjects, prefs, setPrefs } from './db.js';
-import { isPro, proStatus, startTrial, trialUsed, markTrialUsed, CHECKOUT, PRICES, FREE } from './plan.js';
+import {
+  isPro, proStatus, startTrial, trialUsed, markTrialUsed, PRICES, FREE, LEMON, paymentsReady, checkoutUrl,
+  activateLicense, refreshLicense, unlinkLicense,
+} from './plan.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -113,14 +116,38 @@ function show(screen) {
 
 // ================================================================ Pro
 
-let proReasonText = '';
 let selectedPlan = 'yearly';
-function openPro(reason) {
-  proReasonText = reason || 'Desbloquea todos los estilos y exporta sin marca de agua.';
-  $('#proReason').textContent = proReasonText;
+function openPro(reason, { keyMode = false } = {}) {
+  const st = proStatus();
+  const licensed = st.kind === 'license';
+  $('#proBuy').hidden = licensed;
+  $('#proHave').hidden = !licensed;
+  if (licensed) {
+    $('#proTitle').textContent = 'Ya eres Pro ✨';
+    $('#proReason').textContent = 'Todos los estilos, sin marca de agua y en 4K. Gracias por apoyar Subti.';
+    $('#haveTitle').textContent = `Subti Pro${st.plan ? ` · ${st.plan}` : ''}`;
+    $('#haveSub').textContent = st.email || 'Licencia activa en este dispositivo';
+    const portal = $('#portalBtn');
+    portal.hidden = !LEMON.portal;
+    if (LEMON.portal) portal.href = LEMON.portal;
+    openSheet('#proSheet');
+    return;
+  }
+  $('#proTitle').textContent = 'Vídeos que parecen de agencia';
+  $('#proReason').textContent = reason || 'Desbloquea todos los estilos y exporta sin marca de agua.';
+  renderPlans();
+  $('#keyForm').hidden = !keyMode;
+  $('#keyToggle').hidden = keyMode || !paymentsReady();
+  $('#keyError').hidden = true;
+  openSheet('#proSheet');
+  if (keyMode) setTimeout(() => $('#keyInput').focus(), 350);
+}
+
+function renderPlans() {
   const plans = $('#plans');
+  const ready = paymentsReady();
   plans.replaceChildren(
-    ...Object.entries(PRICES).map(([k, p]) => {
+    ...Object.entries(PRICES).filter(([k]) => !ready || LEMON.checkout[k]).map(([k, p]) => {
       const b = el('button', { className: 'plan' });
       b.setAttribute('aria-pressed', String(k === selectedPlan));
       if (k === 'yearly') b.append(el('span', { className: 'tag', textContent: 'MEJOR PRECIO' }));
@@ -132,32 +159,85 @@ function openPro(reason) {
       b.onclick = () => {
         selectedPlan = k;
         haptic();
-        $$('.plan', plans).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        renderPlans();
       };
       return b;
     }),
   );
-  const canTrial = !trialUsed() && !CHECKOUT[selectedPlan];
-  $('#proGo').textContent = canTrial ? 'Probar 7 días gratis' : 'Continuar';
-  $('#proFine').textContent = canTrial ? 'Sin tarjeta. Al terminar la prueba vuelves al plan gratis.' : 'Cancela cuando quieras.';
-  openSheet('#proSheet');
+  if (ready && !LEMON.checkout[selectedPlan]) selectedPlan = LEMON.checkout.yearly ? 'yearly' : 'monthly';
+  const canTrial = !trialUsed();
+  if (ready) {
+    const p = PRICES[selectedPlan];
+    $('#proGo').textContent = `Suscribirme · ${p.price}${p.per}`;
+    $('#proTrial').hidden = !canTrial;
+    $('#proFine').textContent = 'Pago seguro con Lemon Squeezy. IVA incluido. Cancela cuando quieras.';
+  } else {
+    $('#proGo').textContent = canTrial ? 'Probar 7 días gratis' : 'Avísame cuando esté';
+    $('#proTrial').hidden = true;
+    $('#proFine').textContent = canTrial ? 'Sin tarjeta. Al terminar la prueba vuelves al plan gratis.' : 'Los pagos llegan muy pronto.';
+  }
 }
+
+function doTrial() {
+  startTrial();
+  markTrialUsed();
+  haptic(20);
+  closeSheet('#proSheet');
+  refreshPro();
+  toast('✨ Subti Pro activado durante 7 días');
+}
+
 $$('[data-open-pro]').forEach((b) => b.addEventListener('click', () => openPro()));
 $('#proGo').addEventListener('click', () => {
-  if (CHECKOUT[selectedPlan]) {
-    location.href = CHECKOUT[selectedPlan];
+  if (paymentsReady()) {
+    const url = checkoutUrl(selectedPlan);
+    // En una pestaña nueva: la app sigue abierta para pegar la clave al volver.
+    const w = window.open(url, '_blank');
+    if (w) w.opener = null;
+    else location.href = url; // ventanas emergentes bloqueadas: vamos al pago en esta misma pestaña
+    setPrefs('pendingCheckout', Date.now());
+    $('#keyForm').hidden = false;
+    $('#keyToggle').hidden = true;
     return;
   }
-  if (!trialUsed()) {
-    startTrial();
-    markTrialUsed();
-    haptic(20);
-    closeSheet('#proSheet');
-    refreshPro();
-    toast('✨ Subti Pro activado durante 7 días');
-    return;
-  }
+  if (!trialUsed()) return doTrial();
   toast('Los pagos llegan muy pronto. ¡Gracias por tu interés!');
+});
+$('#proTrial').addEventListener('click', doTrial);
+$('#keyToggle').addEventListener('click', () => {
+  $('#keyForm').hidden = false;
+  $('#keyToggle').hidden = true;
+  $('#keyInput').focus();
+});
+$('#keyForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('#keyGo');
+  const err = $('#keyError');
+  err.hidden = true;
+  btn.classList.add('loading');
+  btn.textContent = 'Comprobando…';
+  const res = await activateLicense($('#keyInput').value);
+  btn.classList.remove('loading');
+  btn.textContent = 'Activar';
+  if (!res.ok) {
+    err.textContent = res.error;
+    err.hidden = false;
+    haptic(40);
+    return;
+  }
+  $('#keyInput').value = '';
+  setPrefs('pendingCheckout', null);
+  haptic(25);
+  closeSheet('#proSheet');
+  refreshPro();
+  toast('🎉 ¡Bienvenido a Subti Pro!');
+});
+$('#unlinkKey').addEventListener('click', async () => {
+  if (!confirm('¿Quitar Pro de este dispositivo? Podrás volver a activarlo con tu clave.')) return;
+  await unlinkLicense();
+  closeSheet('#proSheet');
+  refreshPro();
+  toast('Pro quitado de este dispositivo');
 });
 
 function refreshPro() {
@@ -1180,6 +1260,21 @@ loadFonts().then(() => {
 });
 refreshPro();
 renderRecent();
+refreshLicense().then(refreshPro);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  refreshLicense().then(refreshPro);
+  // vuelve del pago en otra pestaña: abre directamente el campo de la clave
+  const pend = prefs('pendingCheckout', null);
+  if (pend && Date.now() - pend < 3600e3 && !isPro() && !sheetStack.includes($('#proSheet'))) openPro('', { keyMode: true });
+});
+if (new URLSearchParams(location.search).has('compra')) {
+  history.replaceState(null, '', location.pathname);
+  setTimeout(() => {
+    openPro('', { keyMode: true });
+    toast('¡Gracias por suscribirte! Pega la clave que te ha llegado por email.', 5000);
+  }, 400);
+}
 show('#home');
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
