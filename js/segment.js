@@ -45,11 +45,14 @@ export class PersonMask {
     this.segmenter = await loadSegmenter();
   }
 
-  /** Procesa un fotograma (como mucho ~30 veces por segundo). */
+  /**
+   * Procesa un fotograma (como mucho ~15 veces por segundo). Leer la máscara de la GPU frena el dibujo,
+   * así que no se hace en cada fotograma: entre medias se reutiliza la última (la silueta apenas cambia).
+   */
   process(video) {
     if (!this.segmenter || !video.videoWidth) return;
     const now = performance.now();
-    if (now - this.lastRun < 30) return;
+    if (now - this.lastRun < 64) return;
     this.lastRun = now;
     const ts = Math.max(this.lastTs + 1, Math.round(now));
     this.lastTs = ts;

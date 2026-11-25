@@ -289,18 +289,29 @@ function renderPartNav() {
 }
 
 /** Coloca la palabra `pos` (fraccional) a un tercio del cuadro. */
+/** Mide una sola vez dónde cae cada palabra (leer el layout en cada fotograma frena la cámara). */
+function measure() {
+  const spans = $('#prompterText').children;
+  S.offs = Array.from(spans, (sp) => sp.offsetTop);
+  S.boxH = $('#prompter').clientHeight;
+  S.lastTy = null;
+}
+
 function scrollTo(pos, instant) {
   const box = $('#prompterText');
   const spans = box.children;
   if (!spans.length) return;
+  if (!S.offs || S.offs.length !== spans.length || instant) measure();
+  if (instant) S.shown = pos;
   const k = Math.min(spans.length - 1, Math.floor(pos));
-  const a = spans[k];
-  const b = spans[Math.min(spans.length - 1, k + 1)];
-  const y = a.offsetTop + (b.offsetTop - a.offsetTop) * (pos - k);
-  const h = $('#prompter').clientHeight;
-  const ty = h * 0.3 - y;
-  box.style.transition = instant ? 'none' : 'transform .35s cubic-bezier(.2,.8,.2,1)';
-  box.style.setProperty('--ty', `${Math.round(ty)}px`);
+  const y0 = S.offs[k];
+  const y1 = S.offs[Math.min(spans.length - 1, k + 1)];
+  const ty = Math.round((S.boxH * 0.3 - (y0 + (y1 - y0) * (pos - k))) * 2) / 2;
+  if (ty !== S.lastTy) {
+    box.style.transition = 'none';
+    box.style.setProperty('--ty', `${ty}px`);
+    S.lastTy = ty;
+  }
   const now = Math.floor(pos);
   if (now !== S.lastShown) {
     for (let i = 0; i < spans.length; i++) {
@@ -317,6 +328,7 @@ function mode() {
 
 function startFollowing() {
   S.pos = 0;
+  S.shown = 0;
   S.matcher.reset(0);
   S.lastShown = -1;
   if (mode() === 'speech') {
@@ -349,9 +361,16 @@ function startLoop() {
       const m = mode();
       const total = S.parts[S.cur].words.length;
       if (m === 'fixed' || (m === 'level' && S.speaking)) S.pos = Math.min(total, S.pos + (S.set.wpm / 60) * dt);
-      scrollTo(Math.min(S.pos, total - 0.001), false);
+      // El texto se desliza suave hacia la palabra objetivo (en «Sigue mi voz» la posición va a saltos).
+      const target = Math.min(S.pos, total - 0.001);
+      S.shown = (S.shown ?? 0) + (target - (S.shown ?? 0)) * Math.min(1, dt * (m === 'speech' ? 6 : 12));
+      scrollTo(S.shown, false);
       if (S.recording) {
-        $('#recTime').textContent = fmt((now - S.t0) / 1000);
+        const sec = Math.floor((now - S.t0) / 1000);
+        if (sec !== S.lastSec) {
+          S.lastSec = sec;
+          $('#recTime').textContent = fmt(sec);
+        }
         if (S.set.autoStop && S.pos >= total) {
           // termina la última palabra y para con un pequeño margen
           S.autoStopAt ??= now + 1200;
@@ -405,12 +424,13 @@ async function startRecording() {
   if (mime === null) return S.toast('Este navegador no puede grabar vídeo');
   stopRehearse();
   if (!(await countdown())) return;
-  const { width, height } = outputSize(S.set.quality, S.set.orientation);
-  const bpp = { standard: 0.08, high: 0.15, max: 0.25 }[S.set.bitrate] ?? 0.15;
+  const direct = canDirect();
+  const { width, height } = direct ? S.camera.nativeSize() : outputSize(S.set.quality, S.set.orientation);
+  const bpp = { standard: 0.1, high: 0.17, max: 0.27 }[S.set.bitrate] ?? 0.17;
   const chunks = [];
   let rec;
   try {
-    rec = new MediaRecorder(S.camera.recordStream(), {
+    rec = new MediaRecorder(direct ? S.camera.directStream() : S.camera.recordStream(), {
       mimeType: mime || undefined,
       videoBitsPerSecond: Math.min(80e6, Math.round(width * height * S.set.fps * bpp)),
       audioBitsPerSecond: { standard: 128e3, high: 192e3, max: 256e3 }[S.set.bitrate] ?? 192e3,
@@ -641,7 +661,7 @@ function bindCameraUi() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && S.recording) stopRecording();
   });
-  window.addEventListener('resize', () => !$('#rec').hidden && scrollTo(S.pos, true));
+  window.addEventListener('resize', () => !$('#rec').hidden && scrollTo(S.shown ?? S.pos, true));
 }
 
 async function focus(p, lock) {
@@ -735,13 +755,17 @@ function bindSettings() {
 }
 
 function onChange(k) {
-  if (['fontSize', 'boxH', 'bgA', 'boxPos', 'align', 'mirror', 'voiceMode'].includes(k)) applyLook();
+  if (['fontSize', 'boxH', 'bgA', 'boxPos', 'align', 'mirror', 'voiceMode'].includes(k)) {
+    applyLook();
+    requestAnimationFrame(() => scrollTo(S.shown ?? S.pos, true));
+  }
   if (k === 'sens' && S.level) S.level.sensitivity = S.set.sens / 100;
   if (['bgMode', 'bgBlur'].includes(k)) {
     if (S.set.bgMode === 'image' && !S.bgImage) $('#bgImage').click();
     applyBackground();
   }
   if (['preset', 'adjust'].includes(k)) S.camera?.setAdjust({ ...(PRESETS[S.set.preset]?.values || {}), ...S.set.adjust });
+  if (['preset', 'adjust', 'bgMode'].includes(k)) renderCamInfo();
   if (['orientation', 'quality', 'fps', 'noiseSuppression', 'echoCancellation', 'autoGainControl'].includes(k)) {
     if (k === 'orientation') {
       S.takes.clear();
@@ -843,8 +867,38 @@ function paintAdj() {
   }
 }
 
+/**
+ * Sin efectos de imagen y con la cámara ya en el formato pedido, se graba la cámara directamente:
+ * el móvil codifica por hardware la imagen original (más nítida y sin tirones). Con efectos hay que pasar
+ * cada fotograma por el canvas, que exige mucho más.
+ */
+function effectsOn() {
+  const s = S.set;
+  return s.preset !== 'natural' || Object.values(s.adjust || {}).some((v) => v) || s.bgMode !== 'none';
+}
+function canDirect() {
+  if (!S.camera?.stream || effectsOn()) return false;
+  const n = S.camera.nativeSize();
+  const out = outputSize(S.set.quality, S.set.orientation);
+  return !!(n.width && n.height) && Math.abs(n.width / n.height - out.width / out.height) < 0.03;
+}
+
+function renderCamInfo() {
+  const el = $('#camInfo');
+  if (!el || !S.camera?.stream) return;
+  const n = S.camera.nativeSize();
+  const out = outputSize(S.set.quality, S.set.orientation);
+  const lines = [`Tu cámara entrega ${n.width}×${n.height}${n.fps ? ` a ${Math.round(n.fps)} fps` : ''}.`];
+  if (canDirect()) lines.push('✅ Grabación directa: máxima calidad y fluidez.');
+  else if (effectsOn()) lines.push('⚠️ Con estilo, ajustes o fondo activos cada fotograma se procesa: en móviles modestos puede ir menos fluido. Para la máxima calidad usa «Natural» sin fondo.');
+  else lines.push(`⚠️ La cámara no da el formato ${out.width}×${out.height} directamente: se recorta y procesa. Prueba otra resolución.`);
+  if (Math.min(n.width, n.height) < Math.min(out.width, out.height) - 8) lines.push(`Tu cámara no llega a ${S.set.quality}p con estos ajustes: la imagen se amplía y pierde nitidez. Elige ${Math.min(n.width, n.height) >= 1000 ? '1080p' : '720p'}.`);
+  el.textContent = lines.join(' ');
+}
+
 const HW_LABELS = { zoom: 'Zoom', exposureCompensation: 'Compensación de exposición', colorTemperature: 'Balance de blancos (K)', focusDistance: 'Enfoque manual' };
 function renderHardware() {
+  renderCamInfo();
   const box = $('#hardware');
   box.replaceChildren();
   const hw = S.camera?.hardware?.() || {};

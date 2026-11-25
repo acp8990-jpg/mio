@@ -44,6 +44,12 @@ Desde el inicio, **Grabar con teleprompter**:
    (ortografía, tildes y puntuación) con los tiempos reales de tu voz. Sin conexión para la IA, salen del guion
    con tiempos aproximados.
 
+**Calidad y fluidez:** con el estilo «Natural» y sin fondo, se graba la cámara **directamente** (codificación por
+hardware del móvil, a su resolución real): máxima nitidez y sin tirones. Con efectos, cada fotograma pasa por la GPU y
+se entrega a la grabación justo al dibujarse (sin fotogramas repetidos). La separación del fondo se calcula a 15 fps y
+el texto del teleprompter se mueve sin forzar recálculos de la página. En Ajustes → Cámara se indica qué resolución
+real da tu cámara y en qué modo se graba.
+
 Reutiliza los módulos de TeleClip (`../js/camera.js`, `grade.js`, `segment.js`, `voice.js` y `export.js`).
 
 ## Estilos
