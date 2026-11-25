@@ -104,6 +104,8 @@ export class Camera {
         if (bg) this.mask.process(v);
         this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
+        // Grabación del canvas: un fotograma por cada fotograma dibujado (sin duplicados ni saltos).
+        this.captureTrack?.requestFrame?.();
       }
       schedule();
     };
@@ -117,6 +119,8 @@ export class Camera {
 
   close() {
     this.running = false;
+    this.captureTrack?.stop?.();
+    this.captureTrack = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.video.srcObject = null;
@@ -126,12 +130,40 @@ export class Camera {
     this.grader.set(values);
   }
 
-  /** Stream para grabar: vídeo del canvas (ya corregido) + audio del micrófono. */
+  /**
+   * Stream para grabar: vídeo del canvas (ya corregido) + audio del micrófono.
+   * Si el navegador lo permite, el canvas entrega un fotograma justo cuando se dibuja uno nuevo
+   * (requestFrame), en vez de muestrearlo con un temporizador: así no hay tirones por fotogramas repetidos.
+   */
   recordStream() {
-    const out = this.canvas.captureStream(this.fps);
+    let out = this.canvas.captureStream(0);
+    const track = out.getVideoTracks()[0];
+    if (track && typeof track.requestFrame === 'function') {
+      this.captureTrack?.stop?.();
+      this.captureTrack = track;
+    } else {
+      track?.stop();
+      out = this.canvas.captureStream(this.fps);
+      this.captureTrack = null;
+    }
     const audio = this.audioTrack;
     if (audio) out.addTrack(audio);
     return out;
+  }
+
+  /** Stream directo de la cámara, sin pasar por el canvas: máxima calidad y fluidez (sin efectos). */
+  directStream() {
+    return new MediaStream(this.stream ? this.stream.getTracks() : []);
+  }
+
+  /** Tamaño real de la imagen que entrega la cámara. */
+  nativeSize() {
+    const s = this.videoTrack?.getSettings?.() ?? {};
+    return {
+      width: this.video.videoWidth || s.width || 0,
+      height: this.video.videoHeight || s.height || 0,
+      fps: s.frameRate || this.fps,
+    };
   }
 
   /** Qué sabe hacer la cámara con el enfoque. */
