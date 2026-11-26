@@ -1,5 +1,5 @@
 // Service worker: guarda la app para que funcione sin conexión.
-const CACHE = 'teleclip-v7';
+const CACHE = 'teleclip-v8';
 const ASSETS = [
   './',
   'index.html',
@@ -11,6 +11,7 @@ const ASSETS = [
   'js/grade.js',
   'js/voice.js',
   'js/segment.js',
+  'js/segment-worker.js',
   'js/timeline.js',
   'js/render.js',
   'js/player.js',
