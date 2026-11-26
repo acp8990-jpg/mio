@@ -61,8 +61,14 @@ export class PersonMask {
         const mask = result.confidenceMasks?.[0];
         if (!mask) return;
         const f = mask.getAsFloat32Array();
-        if (!this.data || this.data.length !== f.length) this.data = new Uint8Array(f.length);
-        for (let i = 0; i < f.length; i++) this.data[i] = f[i] * 255;
+        if (!this.data || this.data.length !== f.length) {
+          this.data = new Uint8Array(f.length);
+          for (let i = 0; i < f.length; i++) this.data[i] = f[i] * 255;
+        } else {
+          // Suavizado en el tiempo: el borde no «baila» entre fotogramas.
+          const d = this.data;
+          for (let i = 0; i < f.length; i++) d[i] = d[i] * 0.35 + f[i] * 165.75;
+        }
         this.width = mask.width;
         this.height = mask.height;
         this.version++;
