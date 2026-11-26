@@ -9,6 +9,7 @@ import { Camera, outputSize } from '../../js/camera.js';
 import { ADJUST_DEFAULTS, PRESETS } from '../../js/grade.js';
 import { tokenize, ScriptMatcher, SpeechFollower, LevelFollower, speechSupported } from '../../js/voice.js';
 import { prefs, setPrefs } from './db.js';
+import { liveSupported, startLive, clearOldTakes } from './liverec.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -33,12 +34,13 @@ export const REC_DEFAULTS = {
   preset: 'natural',
   adjust: {},
   bgMode: 'none',
-  bgBlur: 60,
+  bgBlur: 35,
   bgColor: '#1d1b2e',
   orientation: 'vertical',
   quality: 1080,
   fps: 30,
   bitrate: 'high',
+  engine: 'auto', // auto: con efectos, codificador por hardware (WebCodecs); compat: MediaRecorder
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
@@ -164,6 +166,7 @@ async function openCamera() {
   const sig = parts.map((p) => p.text).join('\n§\n');
   if (sig !== S.sig) {
     S.takes.clear();
+    clearOldTakes();
     S.cur = 0;
   }
   S.sig = sig;
@@ -418,22 +421,76 @@ async function countdown() {
   return ok;
 }
 
+function saveTake(part, blob, duration) {
+  S.takes.set(part, { blob, duration });
+  haptic(20);
+  renderPartNav();
+  const next = S.cur + 1;
+  if (S.set.autoAdvance && next < S.parts.length) {
+    selectPart(next);
+    hint(`Toma guardada ✓ · ahora la parte ${next + 1}`);
+  } else if (S.takes.size === S.parts.length) {
+    openParts();
+  } else hint('Toma guardada ✓');
+}
+
 async function startRecording() {
   if (!S.camera?.stream) return S.toast('La cámara no está lista');
   const mime = pickMime();
-  if (mime === null) return S.toast('Este navegador no puede grabar vídeo');
   stopRehearse();
   if (!(await countdown())) return;
   const direct = canDirect();
   const { width, height } = direct ? S.camera.nativeSize() : outputSize(S.set.quality, S.set.orientation);
   const bpp = { standard: 0.1, high: 0.17, max: 0.27 }[S.set.bitrate] ?? 0.17;
+  const bitrate = Math.min(80e6, Math.round(width * height * S.set.fps * bpp));
+  const audioBitrate = { standard: 128e3, high: 192e3, max: 256e3 }[S.set.bitrate] ?? 192e3;
+  const part = S.cur;
+
+  // Con efectos: fotogramas del canvas directos al codificador por hardware (WebCodecs), sin tirones.
+  if (!direct && S.set.engine !== 'compat' && (await liveSupported(width, height, bitrate))) {
+    try {
+      const live = await startLive({
+        canvas: $('#recCanvas'), audioTrack: S.camera.audioTrack, fps: S.set.fps, bitrate, audioBitrate,
+      });
+      // cada fotograma dibujado (con sus efectos) va al codificador
+      S.camera.onFrame = () => live.frame();
+      live.failed.then((err) => {
+        if (S.recorder?.live !== live) return;
+        console.error(err);
+        S.toast('La grabación falló en este dispositivo. Prueba con menos resolución.', 4500);
+        stopRecording(true);
+      });
+      S.recorder = {
+        live,
+        part,
+        async stop(discard) {
+          if (S.camera) S.camera.onFrame = null;
+          if (discard) return live.cancel();
+          const duration = (performance.now() - S.t0) / 1000;
+          hint('Guardando la toma…');
+          try {
+            saveTake(part, await live.stop(), duration);
+          } catch (err) {
+            console.error(err);
+            S.toast('No se pudo guardar la toma. Vuelve a grabarla.', 4000);
+          }
+        },
+      };
+      beginRecording();
+      return;
+    } catch (err) {
+      console.warn('Grabación por hardware no disponible, uso MediaRecorder', err);
+    }
+  }
+
+  if (mime === null) return S.toast('Este navegador no puede grabar vídeo');
   const chunks = [];
   let rec;
   try {
     rec = new MediaRecorder(direct ? S.camera.directStream() : S.camera.recordStream(), {
       mimeType: mime || undefined,
-      videoBitsPerSecond: Math.min(80e6, Math.round(width * height * S.set.fps * bpp)),
-      audioBitsPerSecond: { standard: 128e3, high: 192e3, max: 256e3 }[S.set.bitrate] ?? 192e3,
+      videoBitsPerSecond: bitrate,
+      audioBitsPerSecond: audioBitrate,
     });
   } catch (err) {
     console.error(err);
@@ -443,26 +500,26 @@ async function startRecording() {
   rec.onstop = () => {
     if (rec.discard) return;
     const blob = new Blob(chunks, { type: (rec.mimeType || mime || 'video/webm').split(';')[0] });
-    const duration = (performance.now() - S.t0) / 1000;
-    S.takes.set(rec.part, { blob, duration });
-    haptic(20);
-    renderPartNav();
-    const next = S.cur + 1;
-    if (S.set.autoAdvance && next < S.parts.length) {
-      selectPart(next);
-      hint(`Toma guardada ✓ · ahora la parte ${next + 1}`);
-    } else if (S.takes.size === S.parts.length) {
-      openParts();
-    } else hint('Toma guardada ✓');
+    saveTake(part, blob, (performance.now() - S.t0) / 1000);
   };
-  rec.part = S.cur;
-  S.recorder = rec;
+  S.recorder = {
+    part,
+    stop(discard) {
+      rec.discard = discard;
+      if (rec.state !== 'inactive') rec.stop();
+    },
+  };
+  beginRecording();
+  rec.start(1000);
+}
+
+function beginRecording() {
   S.recording = true;
   S.autoStopAt = null;
   S.t0 = performance.now();
+  S.lastSec = -1;
   $('#rec').classList.add('recording');
   startFollowing();
-  rec.start(1000);
   haptic(15);
 }
 
@@ -472,11 +529,9 @@ function stopRecording(discard = false) {
   S.recording = false;
   S.speech?.stop();
   $('#rec').classList.remove('recording');
-  if (S.recorder) {
-    S.recorder.discard = discard;
-    if (S.recorder.state !== 'inactive') S.recorder.stop();
-  }
+  const r = S.recorder;
   S.recorder = null;
+  r?.stop(discard);
 }
 
 function startRehearse() {

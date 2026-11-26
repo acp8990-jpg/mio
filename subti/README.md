@@ -50,6 +50,12 @@ se entrega a la grabación justo al dibujarse (sin fotogramas repetidos). La sep
 el texto del teleprompter se mueve sin forzar recálculos de la página. En Ajustes → Cámara se indica qué resolución
 real da tu cámara y en qué modo se graba.
 
+**Fondo desenfocado natural:** la intensidad es progresiva (de un leve efecto de objetivo luminoso a un desenfoque
+fuerte), la silueta no deja halo porque el fondo se desenfoca sin la persona, y el borde se suaviza en el espacio y en
+el tiempo para que no «baile». **Con efectos activos**, los fotogramas van directos al codificador del móvil (WebCodecs)
+en vez de a MediaRecorder; si algún móvil diera problemas, Ajustes → Cámara → Motor «Compatible» vuelve al método
+anterior.
+
 Reutiliza los módulos de TeleClip (`../js/camera.js`, `grade.js`, `segment.js`, `voice.js` y `export.js`).
 
 ## Estilos

@@ -101,11 +101,13 @@ export class Camera {
       if (!this.running) return;
       if (v.readyState >= 2 && v.videoWidth) {
         const bg = this.bgActive && this.mask.ready;
-        if (bg) this.mask.process(v);
         this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
         // Grabación del canvas: un fotograma por cada fotograma dibujado (sin duplicados ni saltos).
         this.captureTrack?.requestFrame?.();
+        this.onFrame?.();
+        // La silueta se calcula después de entregar el fotograma, para no retrasarlo.
+        if (bg) setTimeout(() => this.running && this.mask.process(v), 0);
       }
       schedule();
     };
