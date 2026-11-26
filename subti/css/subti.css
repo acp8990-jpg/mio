@@ -463,6 +463,8 @@ a.btn { text-decoration: none; color: var(--text); }
 input[type="color"] { width: 46px; height: 34px; border: 0; border-radius: 10px; background: none; padding: 0; }
 .adj-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 
+.cam-info.perf { font-variant-numeric: tabular-nums; }
+.cam-info b { color: var(--text); }
 .cam-info { margin: 0 0 16px; padding: 12px 14px; border-radius: 14px; background: var(--surface); color: var(--muted); font-size: 13px; line-height: 1.5; }
 .parts-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; max-height: 46vh; overflow-y: auto; }
 .part-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 14px; background: var(--surface); text-align: left; }

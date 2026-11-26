@@ -35,6 +35,8 @@ export class PersonMask {
     this.version = 0;
     this.lastTs = 0;
     this.lastRun = 0;
+    this.interval = 66; // ms entre cálculos; se adapta a lo que tarda este móvil
+    this.ms = 0; // lo que tarda cada cálculo (media)
   }
 
   get ready() {
@@ -52,7 +54,7 @@ export class PersonMask {
   process(video) {
     if (!this.segmenter || !video.videoWidth) return;
     const now = performance.now();
-    if (now - this.lastRun < 64) return;
+    if (now - this.lastRun < this.interval) return;
     this.lastRun = now;
     const ts = Math.max(this.lastTs + 1, Math.round(now));
     this.lastTs = ts;
@@ -76,5 +78,10 @@ export class PersonMask {
     } catch (err) {
       console.warn('Segmentación fallida', err);
     }
+    // Calcular la silueta bloquea el hilo principal: como mucho un ~20 % del tiempo, para que el dibujo
+    // y la grabación no den tirones en móviles lentos (la silueta se actualiza menos veces, nada más).
+    const took = performance.now() - now;
+    this.ms = this.ms ? this.ms * 0.8 + took * 0.2 : took;
+    this.interval = Math.max(66, Math.min(250, this.ms * 5));
   }
 }
