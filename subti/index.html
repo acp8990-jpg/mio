@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Subti · Subtítulos animados</title>
+  <meta name="description" content="Subtítulos animados automáticos en español para TikTok, Reels y Shorts. En tu móvil, sin subir el vídeo a ningún sitio.">
+  <meta name="theme-color" content="#0A0A0F">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Subti">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="fonts/manrope-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/manrope-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/subti.css">
+  <script type="importmap">{ "imports": { "mediabunny": "../vendor/mediabunny.min.mjs" } }</script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <linearGradient id="g-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8B7BFF"/><stop offset="1" stop-color="#FF4D8D"/></linearGradient>
+    </defs>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.3" fill="currentColor"/><rect x="13.5" y="5" width="4" height="14" rx="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-style" viewBox="0 0 24 24"><path d="M5 19L14.5 4.5M4 7h7M8 19h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><text x="13" y="18" font-size="0"/></symbol>
+    <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 6h14M5 11h14M5 16h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="15" cy="7" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="17" r="2.2" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-export" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2.5l1.9 5.6 5.6 1.9-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9z" fill="currentColor"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 3.5v11M8 7.5l4-4 4 4M6 11H5.5A1.5 1.5 0 0 0 4 12.5v6A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-6a1.5 1.5 0 0 0-1.5-1.5H18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.5-3 8-7 9.5-4-1.5-7-5-7-9.5V6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.5a10 10 0 0 1 4-2.4M14.5 10.2A10 10 0 0 1 19 12.5M2 9a15 15 0 0 1 5-3M11 4.6A15 15 0 0 1 22 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="20" r="1.3" fill="currentColor"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><rect x="3" y="6.5" width="13" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 10.5l5-3v9l-5-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-flip" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-ratio" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-ratio-h" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z M14 3v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="18.5" cy="12" r="1.8" fill="currentColor"/></symbol>
+  </svg>
+
+  <!-- ============ INICIO ============ -->
+  <main id="home" class="screen">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Subti"><span class="brand-dot"></span>subti</a>
+      <button class="pro-pill" data-open-pro><svg><use href="#i-spark"/></svg><span id="proPillLabel">Pro</span></button>
+    </header>
+
+    <section class="hero">
+      <h1>Subtítulos que <span class="grad">enganchan</span>, en&nbsp;un&nbsp;toque.</h1>
+      <p class="lead">Automáticos, en español y animados palabra a palabra. Tu vídeo nunca sale de tu móvil.</p>
+    </section>
+
+    <label class="drop" id="drop">
+      <input id="fileInput" type="file" accept="video/*" hidden>
+      <div class="drop-demo"><canvas id="demoCanvas" width="540" height="960"></canvas></div>
+      <div class="drop-cta">
+        <span class="btn btn-brand btn-xl"><svg><use href="#i-plus"/></svg>Elegir vídeo</span>
+        <span class="hint">o arrástralo aquí · MP4, MOV, WebM</span>
+      </div>
+    </label>
+
+    <button class="rec-cta" id="recCta">
+      <span class="rec-cta-icon"><svg><use href="#i-camera"/></svg></span>
+      <span class="rec-cta-text"><b>Grabar con teleprompter</b><small>Sin límite de texto · sigue tu voz · subtítulos con tu guion exacto</small></span>
+      <svg class="chev"><use href="#i-next"/></svg>
+    </button>
+
+    <ul class="trust">
+      <li><svg><use href="#i-shield"/></svg>100 % privado</li>
+      <li><svg><use href="#i-bolt"/></svg>Sin esperas en servidores</li>
+      <li><svg><use href="#i-wifi-off"/></svg>Funciona sin conexión</li>
+    </ul>
+
+    <section id="recentWrap" class="recent" hidden>
+      <h2>Tus proyectos</h2>
+      <div id="recent" class="recent-grid"></div>
+    </section>
+  </main>
+
+  <!-- ============ PROCESANDO ============ -->
+  <main id="processing" class="screen" hidden>
+    <div class="proc-bg" id="procBg"></div>
+    <div class="proc">
+      <div class="ring" id="ring" style="--p:0">
+        <svg viewBox="0 0 120 120"><circle class="ring-track" cx="60" cy="60" r="52"/><circle class="ring-bar" cx="60" cy="60" r="52"/></svg>
+        <span id="ringPct">0 %</span>
+      </div>
+      <h2 id="procTitle">Preparando el audio…</h2>
+      <p id="procSub" class="muted">Un momento</p>
+      <div class="ticker" id="ticker" aria-live="polite"></div>
+      <button class="btn btn-ghost" id="procCancel">Cancelar</button>
+    </div>
+  </main>
+
+  <!-- ============ EDITOR ============ -->
+  <main id="editor" class="screen editor" hidden>
+    <header class="ed-top">
+      <button class="icon-btn" id="edBack" aria-label="Volver"><svg><use href="#i-back"/></svg></button>
+      <input id="edName" class="ed-name" spellcheck="false" aria-label="Nombre del proyecto">
+      <button class="btn btn-brand" id="edExport"><svg><use href="#i-export"/></svg>Exportar</button>
+    </header>
+
+    <div class="ed-body">
+      <section class="stage-wrap">
+        <div class="stage" id="stage">
+          <video id="video" playsinline preload="auto"></video>
+          <canvas id="overlay"></canvas>
+          <div class="drag-guide" id="dragGuide" hidden><span>Arrastra para colocar</span></div>
+          <button class="big-play" id="bigPlay" aria-label="Reproducir"><svg><use href="#i-play"/></svg></button>
+        </div>
+      </section>
+
+      <section class="transport">
+        <button class="icon-btn play" id="playBtn" aria-label="Reproducir"><svg><use href="#i-play"/></svg></button>
+        <span class="time"><b id="tCur">0:00</b> / <span id="tDur">0:00</span></span>
+      </section>
+
+      <section class="timeline" id="timeline" aria-label="Línea de tiempo">
+        <div class="tl-scroll" id="tlScroll">
+          <div class="tl-inner" id="tlInner">
+            <div class="tl-ruler" id="tlRuler"></div>
+            <div class="tl-track" id="tlTrack"></div>
+            <div class="tl-wave"><canvas id="tlWave"></canvas></div>
+          </div>
+        </div>
+        <div class="tl-head"></div>
+      </section>
+
+      <section class="panel" id="panel">
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="style" aria-selected="true"><svg><use href="#i-style"/></svg>Estilo</button>
+          <button role="tab" data-tab="text"><svg><use href="#i-text"/></svg>Texto</button>
+          <button role="tab" data-tab="adjust"><svg><use href="#i-sliders"/></svg>Ajustes</button>
+        </nav>
+
+        <div class="tab-body" data-body="style">
+          <div class="styles" id="styles"></div>
+          <div class="row-label">Color de resaltado</div>
+          <div class="swatches" id="swatches"></div>
+        </div>
+
+        <div class="tab-body" data-body="text" hidden>
+          <div class="lines" id="lines"></div>
+        </div>
+
+        <div class="tab-body" data-body="adjust" hidden>
+          <label class="ctl">
+            <span>Tamaño <output id="sizeOut"></output></span>
+            <input type="range" id="size" min="0.6" max="1.6" step="0.02">
+          </label>
+          <label class="ctl">
+            <span>Posición <output id="posOut"></output></span>
+            <input type="range" id="pos" min="0.1" max="0.9" step="0.005">
+          </label>
+          <div class="ctl">
+            <span>Palabras a la vez</span>
+            <div class="seg" id="wordsSeg"></div>
+          </div>
+          <div class="ctl ctl-row">
+            <span>Mayúsculas</span>
+            <button class="switch" id="upper" role="switch" aria-checked="false"><i></i></button>
+          </div>
+          <div class="ctl ctl-row">
+            <span>Descargar subtítulos (.srt)</span>
+            <button class="btn btn-soft btn-sm" id="srtBtn"><svg><use href="#i-download"/></svg>SRT</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ============ GUION ============ -->
+  <main id="script" class="screen script-screen" hidden>
+    <header class="ed-top">
+      <button class="icon-btn" id="scriptBack" aria-label="Volver"><svg><use href="#i-back"/></svg></button>
+      <h2 class="ed-title">Tu guion</h2>
+      <button class="icon-btn" id="scriptImport" aria-label="Importar .txt"><svg><use href="#i-file"/></svg></button>
+      <input type="file" id="scriptFile" accept=".txt,text/plain" hidden>
+    </header>
+    <div class="script-body">
+      <textarea id="scriptText" spellcheck="true" placeholder="Escribe o pega aquí tu guion. Sin límite de texto.
+
+Deja una línea en blanco entre párrafos y cada párrafo será una toma: si te equivocas, repites solo esa parte."></textarea>
+      <div class="script-stats" id="scriptStats"></div>
+      <div class="ctl">
+        <span>Grabar por partes</span>
+        <div class="seg seg-3" id="splitSeg">
+          <button data-split="paragraphs"><b>Párrafos</b><small>Una toma por párrafo</small></button>
+          <button data-split="sentences"><b>Frases</b><small>Una toma por frase</small></button>
+          <button data-split="none"><b>Todo seguido</b><small>Una sola toma</small></button>
+        </div>
+      </div>
+    </div>
+    <div class="script-foot">
+      <button class="btn btn-brand btn-xl btn-block" id="scriptGo"><svg><use href="#i-camera"/></svg>Abrir cámara</button>
+    </div>
+  </main>
+
+  <!-- ============ CÁMARA ============ -->
+  <main id="rec" class="rec" hidden>
+    <div class="rec-stage" id="recStage">
+      <canvas id="recCanvas"></canvas>
+      <div class="focus-ring" id="focusRing" hidden></div>
+    </div>
+
+    <div class="prompter" id="prompter">
+      <div class="prompter-text" id="prompterText"></div>
+      <div class="prompter-handle" id="prompterHandle" aria-label="Mover el texto"></div>
+    </div>
+
+    <header class="rec-top">
+      <button class="glass-btn" id="recClose" aria-label="Cerrar"><svg><use href="#i-close"/></svg></button>
+      <div class="rec-pill" id="recPill"><span class="dot"></span><span id="recTime">0:00</span></div>
+      <div class="rec-top-right">
+        <button class="glass-btn" id="recVoice" aria-label="Modo del texto"><svg><use href="#i-mic"/></svg></button>
+        <button class="glass-btn" id="recRatio" aria-label="Formato"><svg><use href="#i-ratio"/></svg></button>
+        <button class="glass-btn" id="recFlip" aria-label="Cambiar cámara"><svg><use href="#i-flip"/></svg></button>
+        <button class="glass-btn" id="recGear" aria-label="Ajustes"><svg><use href="#i-gear"/></svg></button>
+      </div>
+    </header>
+
+    <div class="countdown" id="countdown" hidden></div>
+    <div class="rec-hint" id="recHint" hidden></div>
+
+    <footer class="rec-bottom">
+      <div class="parts-nav">
+        <button class="glass-btn sm" id="partPrev" aria-label="Parte anterior"><svg><use href="#i-prev"/></svg></button>
+        <button class="part-pill" id="partPill">Parte 1 de 1</button>
+        <button class="glass-btn sm" id="partNext" aria-label="Parte siguiente"><svg><use href="#i-next"/></svg></button>
+      </div>
+      <div class="rec-row">
+        <button class="side-btn" id="rehearse"><span class="glass-btn"><svg><use href="#i-play"/></svg></span><small>Ensayar</small></button>
+        <button class="rec-btn" id="recBtn" aria-label="Grabar"><i></i></button>
+        <button class="side-btn" id="recDone"><span class="glass-btn done"><svg><use href="#i-check"/></svg></span><small id="recDoneLabel">Listo</small></button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Ajustes de grabación -->
+  <section class="sheet sheet-tall" id="recSheet" hidden aria-modal="true" role="dialog" aria-label="Ajustes de grabación">
+    <div class="grabber"></div>
+    <nav class="tabs rec-tabs" role="tablist">
+      <button role="tab" data-rtab="text" aria-selected="true">Texto</button>
+      <button role="tab" data-rtab="voice">Voz</button>
+      <button role="tab" data-rtab="image">Imagen</button>
+      <button role="tab" data-rtab="camera">Cámara</button>
+    </nav>
+    <div class="rtab" data-rbody="text">
+      <label class="ctl"><span>Tamaño del texto <output id="o-fontSize"></output></span><input type="range" data-set="fontSize" min="18" max="72" step="1"></label>
+      <label class="ctl"><span>Velocidad <output id="o-wpm"></output></span><input type="range" data-set="wpm" min="70" max="240" step="5"></label>
+      <label class="ctl"><span>Alto del cuadro <output id="o-boxH"></output></span><input type="range" data-set="boxH" min="18" max="80" step="1"></label>
+      <label class="ctl"><span>Fondo del cuadro <output id="o-bgA"></output></span><input type="range" data-set="bgA" min="0" max="95" step="5"></label>
+      <div class="ctl"><span>Posición</span><div class="seg" data-seg="boxPos"><button data-v="top">Arriba</button><button data-v="middle">Centro</button><button data-v="bottom">Abajo</button></div></div>
+      <div class="ctl"><span>Alineación</span><div class="seg" data-seg="align"><button data-v="left">Izquierda</button><button data-v="center">Centro</button></div></div>
+      <div class="ctl"><span>Cuenta atrás</span><div class="seg" data-seg="countdown"><button data-v="0">No</button><button data-v="3">3 s</button><button data-v="5">5 s</button><button data-v="10">10 s</button></div></div>
+      <div class="ctl ctl-row"><span>Texto en espejo (para cristal de teleprompter)</span><button class="switch" data-sw="mirror" role="switch"><i></i></button></div>
+      <div class="ctl ctl-row"><span>Pasar a la siguiente parte al parar</span><button class="switch" data-sw="autoAdvance" role="switch"><i></i></button></div>
+      <div class="ctl ctl-row"><span>Parar al terminar el texto</span><button class="switch" data-sw="autoStop" role="switch"><i></i></button></div>
+    </div>
+    <div class="rtab" data-rbody="voice" hidden>
+      <div class="ctl"><span>Cómo avanza el texto</span>
+        <div class="seg seg-3" data-seg="voiceMode">
+          <button data-v="speech"><b>Sigue mi voz</b><small>Va a la palabra que dices</small></button>
+          <button data-v="level"><b>Mientras hablo</b><small>Se para si te callas</small></button>
+          <button data-v="fixed"><b>Velocidad fija</b><small>Siempre al mismo ritmo</small></button>
+        </div>
+      </div>
+      <p class="fine" id="voiceNote"></p>
+      <div class="ctl"><span>Idioma del guion</span><div class="chips" id="voiceLangs"></div></div>
+      <label class="ctl"><span>Sensibilidad del micrófono <output id="o-sens"></output></span><input type="range" data-set="sens" min="0" max="100" step="5"></label>
+      <div class="meter"><i id="micMeter"></i></div>
+    </div>
+    <div class="rtab" data-rbody="image" hidden>
+      <div class="ctl"><span>Estilo</span><div class="chips" id="presetChips"></div></div>
+      <div class="ctl"><span>Fondo</span>
+        <div class="seg" data-seg="bgMode"><button data-v="none">Original</button><button data-v="blur">Desenfocar</button><button data-v="color">Color</button><button data-v="image">Imagen</button></div>
+      </div>
+      <label class="ctl" id="bgBlurCtl"><span>Desenfoque <output id="o-bgBlur"></output></span><input type="range" data-set="bgBlur" min="5" max="100" step="5"></label>
+      <div class="ctl ctl-row" id="bgColorCtl"><span>Color de fondo</span><input type="color" id="bgColor"></div>
+      <div class="ctl ctl-row" id="bgImageCtl"><span>Imagen de fondo</span><label class="btn btn-soft btn-sm">Elegir<input type="file" id="bgImage" accept="image/*" hidden></label></div>
+      <p class="fine" id="bgNote">Separa tu silueta del fondo en el propio móvil (la primera vez descarga ~15 MB).</p>
+      <div id="adjusts"></div>
+      <button class="link-btn" id="resetAdjust">Restablecer imagen</button>
+    </div>
+    <div class="rtab" data-rbody="camera" hidden>
+      <div class="ctl"><span>Formato</span><div class="seg" data-seg="orientation"><button data-v="vertical">Vertical 9:16</button><button data-v="horizontal">Horizontal 16:9</button></div></div>
+      <div class="ctl"><span>Resolución</span><div class="seg" data-seg="quality"><button data-v="720">720p</button><button data-v="1080">1080p</button><button data-v="2160">4K</button></div></div>
+      <div class="ctl"><span>Fotogramas</span><div class="seg" data-seg="fps"><button data-v="30">30 fps</button><button data-v="60">60 fps</button></div></div>
+      <div class="ctl"><span>Calidad de grabación</span><div class="seg" data-seg="bitrate"><button data-v="standard">Ligera</button><button data-v="high">Alta</button><button data-v="max">Máxima</button></div></div>
+      <div class="ctl ctl-row"><span>Reducción de ruido</span><button class="switch" data-sw="noiseSuppression" role="switch"><i></i></button></div>
+      <div class="ctl ctl-row"><span>Cancelación de eco</span><button class="switch" data-sw="echoCancellation" role="switch"><i></i></button></div>
+      <div class="ctl ctl-row"><span>Volumen automático</span><button class="switch" data-sw="autoGainControl" role="switch"><i></i></button></div>
+      <p class="cam-info" id="camInfo"></p>
+      <div id="hardware"></div>
+      <p class="fine">Toca la imagen para enfocar ahí; mantén pulsado para bloquear el enfoque y la exposición.</p>
+    </div>
+  </section>
+
+  <!-- Partes grabadas -->
+  <section class="sheet" id="partsSheet" hidden aria-modal="true" role="dialog" aria-labelledby="partsTitle">
+    <div class="grabber"></div>
+    <h3 id="partsTitle">Tus tomas</h3>
+    <div class="parts-list" id="partsList"></div>
+    <button class="btn btn-brand btn-xl btn-block" id="partsGo"><svg><use href="#i-spark"/></svg>Unir y poner subtítulos</button>
+    <p class="fine center" id="partsFine"></p>
+  </section>
+
+  <!-- ============ HOJAS ============ -->
+  <div class="scrim" id="scrim" hidden></div>
+
+  <section class="sheet" id="setupSheet" hidden aria-modal="true" role="dialog" aria-labelledby="setupTitle">
+    <div class="grabber"></div>
+    <h3 id="setupTitle">Generar subtítulos</h3>
+    <div class="setup-file" id="setupFile"></div>
+    <div class="ctl">
+      <span>Idioma del vídeo</span>
+      <div class="chips" id="langChips"></div>
+    </div>
+    <div class="ctl">
+      <span>Transcripción</span>
+      <div class="seg seg-2" id="qualitySeg">
+        <button data-q="fast"><b>Rápida</b><small>Ideal para la mayoría</small></button>
+        <button data-q="precise"><b>Máxima precisión</b><small>Más lenta · descarga mayor</small></button>
+      </div>
+    </div>
+    <p class="fine" id="setupNote">La primera vez se descarga el modelo de voz (≈80 MB) y queda guardado para siempre.</p>
+    <button class="btn btn-brand btn-xl btn-block" id="setupGo"><svg><use href="#i-spark"/></svg>Generar subtítulos</button>
+  </section>
+
+  <section class="sheet" id="exportSheet" hidden aria-modal="true" role="dialog" aria-labelledby="exportTitle">
+    <div class="grabber"></div>
+    <div id="exportSetup">
+      <h3 id="exportTitle">Exportar vídeo</h3>
+      <div class="ctl">
+        <span>Calidad</span>
+        <div class="seg seg-3" id="resSeg"></div>
+      </div>
+      <div class="ctl ctl-row wm-row">
+        <span>Marca de agua «hecho con subti»</span>
+        <button class="switch" id="wmSwitch" role="switch" aria-checked="true"><i></i></button>
+      </div>
+      <button class="btn btn-brand btn-xl btn-block" id="exportGo"><svg><use href="#i-export"/></svg>Exportar MP4</button>
+    </div>
+    <div id="exportRun" hidden>
+      <h3>Creando tu vídeo…</h3>
+      <div class="bar"><i id="exportBar"></i></div>
+      <p class="muted" id="exportInfo">0 %</p>
+      <button class="btn btn-ghost btn-block" id="exportCancel">Cancelar</button>
+    </div>
+    <div id="exportDone" hidden>
+      <h3>¡Listo! <span class="grad">🎉</span></h3>
+      <video id="resultVideo" class="result-video" playsinline controls></video>
+      <div class="actions">
+        <button class="btn btn-brand btn-lg" id="shareBtn"><svg><use href="#i-share"/></svg>Compartir</button>
+        <button class="btn btn-soft btn-lg" id="saveBtn"><svg><use href="#i-download"/></svg>Guardar</button>
+      </div>
+      <p class="fine center" id="doneInfo"></p>
+    </div>
+  </section>
+
+  <section class="sheet sheet-pro" id="proSheet" hidden aria-modal="true" role="dialog" aria-labelledby="proTitle">
+    <button class="icon-btn sheet-x" data-close aria-label="Cerrar"><svg><use href="#i-close"/></svg></button>
+    <div class="pro-hero">
+      <div class="pro-badge"><svg><use href="#i-spark"/></svg>Subti Pro</div>
+      <h3 id="proTitle">Vídeos que parecen de agencia</h3>
+      <p class="muted" id="proReason">Desbloquea todos los estilos y exporta sin marca de agua.</p>
+    </div>
+    <ul class="perks">
+      <li><svg><use href="#i-check"/></svg>Los 8 estilos animados, y los que vayan llegando</li>
+      <li><svg><use href="#i-check"/></svg>Sin marca de agua</li>
+      <li><svg><use href="#i-check"/></svg>Exportación en 4K</li>
+      <li><svg><use href="#i-check"/></svg>Transcripción de máxima precisión</li>
+    </ul>
+    <div id="proBuy">
+      <div class="plans" id="plans"></div>
+      <button class="btn btn-brand btn-xl btn-block" id="proGo">Probar 7 días gratis</button>
+      <button class="btn btn-ghost btn-block pro-trial" id="proTrial" hidden>Probar 7 días gratis</button>
+      <p class="fine center" id="proFine">Cancela cuando quieras.</p>
+      <button class="link-btn" id="keyToggle">¿Ya tienes una clave de licencia?</button>
+      <form class="key-form" id="keyForm" hidden>
+        <label for="keyInput">Pega la clave que te llegó por email al suscribirte</label>
+        <div class="key-row">
+          <input id="keyInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX">
+          <button class="btn btn-soft" id="keyGo" type="submit">Activar</button>
+        </div>
+        <p class="key-error" id="keyError" role="alert" hidden></p>
+      </form>
+    </div>
+    <div id="proHave" hidden>
+      <div class="have-card">
+        <svg><use href="#i-check"/></svg>
+        <div><b id="haveTitle">Tienes Subti Pro</b><span id="haveSub"></span></div>
+      </div>
+      <a class="btn btn-soft btn-lg btn-block" id="portalBtn" target="_blank" rel="noopener">Gestionar suscripción</a>
+      <button class="link-btn danger" id="unlinkKey">Quitar Pro de este dispositivo</button>
+    </div>
+  </section>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

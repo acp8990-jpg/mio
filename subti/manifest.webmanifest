@@ -1,0 +1,23 @@
+{
+  "name": "Subti – Subtítulos animados",
+  "short_name": "Subti",
+  "description": "Subtítulos animados automáticos en español para TikTok, Reels y Shorts, en tu propio móvil.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0A0F",
+  "theme_color": "#0A0A0F",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "share_target": {
+    "action": "./?share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": { "files": [{ "name": "video", "accept": ["video/*"] }] }
+  }
+}
