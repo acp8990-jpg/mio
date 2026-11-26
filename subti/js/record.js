@@ -381,7 +381,13 @@ function startLoop() {
         }
       }
     }
-    if (!$('#recSheet').hidden) $('#micMeter').style.width = `${Math.min(100, (S.level?.level || 0) * 900)}%`;
+    if (!$('#recSheet').hidden) {
+      $('#micMeter').style.width = `${Math.min(100, (S.level?.level || 0) * 900)}%`;
+      if (now - (S.perfAt || 0) > 500) {
+        S.perfAt = now;
+        renderPerf();
+      }
+    }
     S.raf = requestAnimationFrame(loop);
   };
   S.raf = requestAnimationFrame(loop);
@@ -453,7 +459,7 @@ async function startRecording() {
         canvas: $('#recCanvas'), audioTrack: S.camera.audioTrack, fps: S.set.fps, bitrate, audioBitrate,
       });
       // cada fotograma dibujado (con sus efectos) va al codificador
-      S.camera.onFrame = () => live.frame();
+      S.camera.onFrame = (when) => live.frame(when);
       live.failed.then((err) => {
         if (S.recorder?.live !== live) return;
         console.error(err);
@@ -469,7 +475,13 @@ async function startRecording() {
           const duration = (performance.now() - S.t0) / 1000;
           hint('Guardando la toma…');
           try {
-            saveTake(part, await live.stop(), duration);
+            const blob = await live.stop();
+            const fps = live.stats.frames / Math.max(0.1, duration);
+            S.lastTake = { fps, dropped: live.stats.dropped };
+            saveTake(part, blob, duration);
+            if (fps < S.set.fps * 0.8) {
+              setTimeout(() => S.toast(`La toma salió a ${Math.round(fps)} fps: este móvil va justo con el desenfoque. Prueba 720p en ⚙ → Cámara.`, 5000), 2300);
+            }
           } catch (err) {
             console.error(err);
             S.toast('No se pudo guardar la toma. Vuelve a grabarla.', 4000);
@@ -936,6 +948,18 @@ function canDirect() {
   const n = S.camera.nativeSize();
   const out = outputSize(S.set.quality, S.set.orientation);
   return !!(n.width && n.height) && Math.abs(n.width / n.height - out.width / out.height) < 0.03;
+}
+
+/** Medidor de rendimiento (⚙ → Cámara): para saber qué frena en cada móvil. */
+function renderPerf() {
+  const el = $('#perfInfo');
+  const st = S.camera?.stats;
+  if (!el || !st) return;
+  const m = S.camera.mask;
+  const parts = [`Vista previa: <b>${Math.round(st.fps)} fps</b> (objetivo ${S.set.fps})`, `Procesado: <b>${st.drawMs.toFixed(1)} ms</b>/fotograma`];
+  if (S.camera.bgActive && m?.ready) parts.push(`Silueta: <b>${Math.round(m.ms)} ms</b> cada ${Math.round(m.interval)} ms`);
+  if (S.lastTake) parts.push(`Última toma: <b>${S.lastTake.fps.toFixed(1)} fps</b>${S.lastTake.dropped ? ` · ${S.lastTake.dropped} saltados` : ''}`);
+  el.innerHTML = parts.join('<br>');
 }
 
 function renderCamInfo() {

@@ -92,9 +92,13 @@ export async function startLive({ canvas, audioTrack, fps, bitrate, audioBitrate
   return {
     failed,
     stats,
-    frame() {
+    /** @param {number} [when] momento de captura del fotograma (reloj de performance.now) */
+    frame(when) {
       if (closed) return;
-      const ts = (performance.now() - t0) / 1000;
+      const now = performance.now();
+      const at = typeof when === 'number' && Math.abs(now - when) < 500 ? when : now;
+      const ts = (at - t0) / 1000;
+      if (ts <= last) return;
       if (ts - last < minGap) return; // la cámara da más fotogramas de los pedidos
       if (busy) {
         stats.dropped++;
