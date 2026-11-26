@@ -429,8 +429,10 @@ async function startRecording() {
   const bpp = { standard: 0.1, high: 0.17, max: 0.27 }[S.set.bitrate] ?? 0.17;
   const chunks = [];
   let rec;
+  let recStream;
   try {
-    rec = new MediaRecorder(direct ? S.camera.directStream() : S.camera.recordStream(), {
+    recStream = direct ? S.camera.directStream() : S.camera.recordStream();
+    rec = new MediaRecorder(recStream, {
       mimeType: mime || undefined,
       videoBitsPerSecond: Math.min(80e6, Math.round(width * height * S.set.fps * bpp)),
       audioBitsPerSecond: { standard: 128e3, high: 192e3, max: 256e3 }[S.set.bitrate] ?? 192e3,
@@ -441,6 +443,7 @@ async function startRecording() {
   }
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   rec.onstop = () => {
+    if (!direct) S.camera.releaseStream(recStream);
     if (rec.discard) return;
     const blob = new Blob(chunks, { type: (rec.mimeType || mime || 'video/webm').split(';')[0] });
     const duration = (performance.now() - S.t0) / 1000;

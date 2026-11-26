@@ -32,6 +32,7 @@ export class Camera {
     this.fps = 30;
     this.running = false;
     this.frameCount = 0;
+    this.captureTracks = new Set(); // pistas del canvas de las grabaciones en curso
     this.mask = new PersonMask();
     this.bg = { mode: 'none', blur: 0, color: [0.1, 0.1, 0.12] };
   }
@@ -105,7 +106,7 @@ export class Camera {
         this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
         // Grabación del canvas: un fotograma por cada fotograma dibujado (sin duplicados ni saltos).
-        this.captureTrack?.requestFrame?.();
+        for (const t of this.captureTracks) t.requestFrame();
       }
       schedule();
     };
@@ -119,8 +120,8 @@ export class Camera {
 
   close() {
     this.running = false;
-    this.captureTrack?.stop?.();
-    this.captureTrack = null;
+    for (const t of this.captureTracks) t.stop();
+    this.captureTracks.clear();
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.video.srcObject = null;
@@ -139,16 +140,23 @@ export class Camera {
     let out = this.canvas.captureStream(0);
     const track = out.getVideoTracks()[0];
     if (track && typeof track.requestFrame === 'function') {
-      this.captureTrack?.stop?.();
-      this.captureTrack = track;
+      // Cada grabación tiene su propia pista: así terminar una no corta otra que aún se está guardando.
+      this.captureTracks.add(track);
     } else {
       track?.stop();
       out = this.canvas.captureStream(this.fps);
-      this.captureTrack = null;
     }
     const audio = this.audioTrack;
     if (audio) out.addTrack(audio);
     return out;
+  }
+
+  /** Suelta la pista de vídeo de una grabación ya terminada (el audio es de la cámara y sigue abierto). */
+  releaseStream(stream) {
+    for (const t of stream.getVideoTracks()) {
+      this.captureTracks.delete(t);
+      t.stop();
+    }
   }
 
   /** Stream directo de la cámara, sin pasar por el canvas: máxima calidad y fluidez (sin efectos). */

@@ -20,7 +20,7 @@ export function createEditor(app) {
   let rebuildTimer = 0;
   let saveTimer = 0;
   let visible = false;
-  const analyzing = new Set();
+  const analyzing = new Map(); // takeId -> promesa del análisis en curso
   let selectedOverlay = null;
 
   // ---------------------------------------------------------------- utilidades
@@ -66,28 +66,43 @@ export function createEditor(app) {
 
   // ---------------------------------------------------------------- análisis de tomas
 
+  /** Analiza una toma una sola vez, aunque se pida desde varios sitios a la vez. */
+  function analyze(t) {
+    if (t.analysis) return Promise.resolve();
+    if (!analyzing.has(t.id)) {
+      const job = (async () => {
+        try {
+          t.analysis = await analyzeTake(t.blob);
+          await putTake(t);
+        } catch (err) {
+          console.error('Análisis fallido', err);
+          t.analysis = { t0: 0, duration: t.duration || 1, speech: [], wave: [], width: t.width, height: t.height };
+        } finally {
+          analyzing.delete(t.id);
+        }
+      })();
+      analyzing.set(t.id, job);
+    }
+    return analyzing.get(t.id);
+  }
+
   async function ensureAnalysis() {
     const pending = [];
-    for (const list of app.takes().values()) for (const t of list) if (!t.analysis && !analyzing.has(t.id)) pending.push(t);
+    for (const list of app.takes().values()) for (const t of list) if (!t.analysis) pending.push(t);
     if (!pending.length) return;
     const busy = $('edBusy');
     busy.hidden = false;
     let n = 0;
+    // También espera a las tomas que ya se estaban analizando en segundo plano.
     for (const t of pending) {
-      analyzing.add(t.id);
       busy.textContent = `Analizando el audio de los clips… ${++n}/${pending.length}`;
-      try {
-        t.analysis = await analyzeTake(t.blob);
-        await putTake(t);
-      } catch (err) {
-        console.error('Análisis fallido', err);
-        t.analysis = { t0: 0, duration: t.duration || 1, speech: [], wave: [], width: t.width, height: t.height };
-      }
-      analyzing.delete(t.id);
+      await analyze(t);
     }
     busy.hidden = true;
-    renderClipList();
-    rebuild();
+    if (visible) {
+      renderClipList();
+      rebuild();
+    }
   }
 
   // ---------------------------------------------------------------- transporte
@@ -774,17 +789,12 @@ export function createEditor(app) {
       rebuild();
       ensureAnalysis();
     },
-    /** Analiza en segundo plano una toma recién grabada. */
+    /** Analiza en segundo plano una toma recién grabada (y actualiza el editor si está abierto). */
     async analyzeInBackground(take) {
-      if (take.analysis || analyzing.has(take.id)) return;
-      analyzing.add(take.id);
-      try {
-        take.analysis = await analyzeTake(take.blob);
-        await putTake(take);
-      } catch (err) {
-        console.warn('Análisis en segundo plano fallido', err);
-      } finally {
-        analyzing.delete(take.id);
+      await analyze(take);
+      if (visible) {
+        renderClipList();
+        rebuild();
       }
     },
   };

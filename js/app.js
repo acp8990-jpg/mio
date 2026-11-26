@@ -791,7 +791,19 @@ function stopCamera() {
   camera.close();
 }
 
-async function startCamera() {
+let cameraOpening = null;
+/** Abre la cámara. Las aperturas van en fila: dos a la vez se pisarían. */
+function startCamera() {
+  const prev = cameraOpening;
+  cameraOpening = (async () => {
+    await prev?.catch(() => {});
+    await openCameraNow();
+  })();
+  return cameraOpening;
+}
+
+async function openCameraNow() {
+  await state.saving; // no cortar un clip que aún se está guardando
   $('camError').hidden = true;
   const s = state.settings;
   try {
@@ -1218,6 +1230,7 @@ async function runCountdown(seconds) {
 }
 
 async function startRecording() {
+  if (cameraOpening) await cameraOpening.catch(() => {});
   if (!camera.stream) await startCamera();
   if (!camera.stream) return;
   const mime = pickMime();
@@ -1238,7 +1251,8 @@ async function startRecording() {
 
   const br = bitrates();
   const chunks = [];
-  const rec = new MediaRecorder(camera.recordStream(), {
+  const recStream = camera.recordStream();
+  const rec = new MediaRecorder(recStream, {
     ...(mime ? { mimeType: mime } : {}),
     videoBitsPerSecond: br.video,
     audioBitsPerSecond: br.audio,
@@ -1246,8 +1260,13 @@ async function startRecording() {
   const seg = state.current;
   const text = state.segments[seg];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  let finished;
+  state.saving = new Promise((r) => (finished = r));
+  let startedAt = 0;
+  rec.onstart = () => (startedAt = performance.now());
   rec.onstop = async () => {
-    const duration = (performance.now() - state.recStart) / 1000;
+    camera.releaseStream(recStream);
+    const duration = (performance.now() - (startedAt || state.recStart)) / 1000;
     const type = rec.mimeType || mime || 'video/webm';
     const blob = new Blob(chunks, { type });
     const take = {
@@ -1267,6 +1286,8 @@ async function startRecording() {
     } catch (err) {
       console.error(err);
       toast('No se pudo guardar el clip (¿almacenamiento lleno?)');
+    } finally {
+      finished();
     }
   };
   state.recorder = rec;
@@ -1335,15 +1356,16 @@ async function openRecorder(i) {
   keepAwake(true);
 }
 
-function closeRecorder() {
+async function closeRecorder() {
   if (state.recording) stopRecording();
   state.countingDown = false;
   stopMeter();
   stopFollowing();
   $('settings').hidden = true;
-  // Esperamos un instante para que el último clip termine de escribirse antes de soltar la cámara.
-  setTimeout(stopCamera, 300);
   keepAwake(false);
+  // No se suelta la cámara hasta que el último clip esté guardado del todo.
+  await state.saving;
+  if ($('view-record').hidden) stopCamera();
 }
 
 $('recBack').addEventListener('click', () => {
