@@ -201,6 +201,7 @@ button.icon {
 .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
 
 .toast {
+  pointer-events: none; /* los avisos nunca tapan un toque en lo que hay debajo */
   position: fixed; z-index: 50; left: 50%; transform: translateX(-50%);
   bottom: calc(120px + var(--safe-bottom)); max-width: calc(100% - 32px);
   background: #fff; color: #111; padding: 10px 16px; border-radius: 999px; font-size: .95rem;

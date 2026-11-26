@@ -40,6 +40,10 @@ export class PersonMask {
     this.lastRun = 0;
     this.lastTs = 0;
     this.mode = null; // 'worker' | 'main'
+    this.interval = 0; // ms entre siluetas (para el medidor)
+    this.ms = 0; // ms que tarda cada silueta (media)
+    this.sentAt = 0;
+    this.lastMaskAt = 0;
     this.enabling = null;
   }
 
@@ -86,7 +90,14 @@ export class PersonMask {
   }
 
   #onWorker(msg) {
-    if (msg.type === 'mask') this.#store(msg.data, msg.width, msg.height);
+    if (msg.type === 'mask') {
+      const now = performance.now();
+      const took = now - this.sentAt;
+      this.ms = this.ms ? this.ms * 0.8 + took * 0.2 : took;
+      if (this.lastMaskAt) this.interval = this.interval ? this.interval * 0.8 + (now - this.lastMaskAt) * 0.2 : now - this.lastMaskAt;
+      this.lastMaskAt = now;
+      this.#store(msg.data, msg.width, msg.height);
+    }
     if (msg.type === 'mask' || msg.type === 'skip' || msg.type === 'error') this.inFlight = false;
   }
 
@@ -108,7 +119,7 @@ export class PersonMask {
     const now = performance.now();
     if (this.mode === 'main') {
       // Sin hilo aparte: como mucho ~12 veces por segundo para no frenar el dibujo.
-      if (now - this.lastRun < 80) return;
+      if (now - this.lastRun < Math.max(80, this.interval)) return;
       this.lastRun = now;
       const ts = Math.max(this.lastTs + 1, Math.round(now));
       this.lastTs = ts;
@@ -124,9 +135,14 @@ export class PersonMask {
       } catch (err) {
         console.warn('Segmentación fallida', err);
       }
+      // Como mucho ~20 % del hilo principal: en móviles lentos la silueta se actualiza menos veces.
+      const took = performance.now() - now;
+      this.ms = this.ms ? this.ms * 0.8 + took * 0.2 : took;
+      this.interval = Math.max(80, Math.min(250, this.ms * 5));
       return;
     }
     this.inFlight = true;
+    this.sentAt = now;
     const k = INPUT / Math.max(video.videoWidth, video.videoHeight);
     const w = Math.max(1, Math.round(video.videoWidth * k));
     const h = Math.max(1, Math.round(video.videoHeight * k));

@@ -291,7 +291,7 @@ Deja una línea en blanco entre párrafos y cada párrafo será una toma: si te 
       <div class="ctl"><span>Fondo</span>
         <div class="seg" data-seg="bgMode"><button data-v="none">Original</button><button data-v="blur">Desenfocar</button><button data-v="color">Color</button><button data-v="image">Imagen</button></div>
       </div>
-      <label class="ctl" id="bgBlurCtl"><span>Desenfoque <output id="o-bgBlur"></output></span><input type="range" data-set="bgBlur" min="5" max="100" step="5"></label>
+      <label class="ctl" id="bgBlurCtl"><span>Desenfoque <output id="o-bgBlur"></output></span><input type="range" data-set="bgBlur" min="0" max="100" step="1"></label>
       <div class="ctl ctl-row" id="bgColorCtl"><span>Color de fondo</span><input type="color" id="bgColor"></div>
       <div class="ctl ctl-row" id="bgImageCtl"><span>Imagen de fondo</span><label class="btn btn-soft btn-sm">Elegir<input type="file" id="bgImage" accept="image/*" hidden></label></div>
       <p class="fine" id="bgNote">Separa tu silueta del fondo en el propio móvil (la primera vez descarga ~15 MB).</p>
@@ -303,10 +303,12 @@ Deja una línea en blanco entre párrafos y cada párrafo será una toma: si te 
       <div class="ctl"><span>Resolución</span><div class="seg" data-seg="quality"><button data-v="720">720p</button><button data-v="1080">1080p</button><button data-v="2160">4K</button></div></div>
       <div class="ctl"><span>Fotogramas</span><div class="seg" data-seg="fps"><button data-v="30">30 fps</button><button data-v="60">60 fps</button></div></div>
       <div class="ctl"><span>Calidad de grabación</span><div class="seg" data-seg="bitrate"><button data-v="standard">Ligera</button><button data-v="high">Alta</button><button data-v="max">Máxima</button></div></div>
+      <div class="ctl"><span>Motor de grabación con efectos</span><div class="seg seg-2" data-seg="engine"><button data-v="auto"><b>Rápido</b><small>Codificador del móvil</small></button><button data-v="compat"><b>Compatible</b><small>Si el rápido falla</small></button></div></div>
       <div class="ctl ctl-row"><span>Reducción de ruido</span><button class="switch" data-sw="noiseSuppression" role="switch"><i></i></button></div>
       <div class="ctl ctl-row"><span>Cancelación de eco</span><button class="switch" data-sw="echoCancellation" role="switch"><i></i></button></div>
       <div class="ctl ctl-row"><span>Volumen automático</span><button class="switch" data-sw="autoGainControl" role="switch"><i></i></button></div>
       <p class="cam-info" id="camInfo"></p>
+      <p class="cam-info perf" id="perfInfo"></p>
       <div id="hardware"></div>
       <p class="fine">Toca la imagen para enfocar ahí; mantén pulsado para bloquear el enfoque y la exposición.</p>
     </div>

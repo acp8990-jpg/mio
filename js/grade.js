@@ -64,6 +64,7 @@ uniform float uBg;
 uniform float uBgMode; // 1 desenfoque, 2 color, 3 imagen
 uniform vec3 uBgColor;
 uniform vec4 uBgCrop;
+uniform vec2 uMaskTexel;
 
 vec3 px(vec2 o) { return texture2D(uTex, vUv + o * uTexel).rgb; }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -88,10 +89,19 @@ void main() {
   }
 
   if (uBg > 0.0) {
-    // Fondo sustituido detrás de la persona (máscara de MediaPipe, bordes suavizados).
-    float m = smoothstep(0.3, 0.75, texture2D(uMask, vUv).r);
+    // Fondo sustituido detrás de la persona. La máscara de MediaPipe es pequeña: se suaviza con 5 muestras
+    // y una transición amplia para que el borde del pelo y los hombros no quede recortado.
+    vec2 mt = uMaskTexel * 1.25;
+    float mr = texture2D(uMask, vUv).r * 0.36
+      + (texture2D(uMask, vUv + vec2(mt.x, 0.0)).r + texture2D(uMask, vUv - vec2(mt.x, 0.0)).r
+      + texture2D(uMask, vUv + vec2(0.0, mt.y)).r + texture2D(uMask, vUv - vec2(0.0, mt.y)).r) * 0.16;
+    float m = smoothstep(0.18, 0.82, mr);
     vec3 bg;
-    if (uBgMode < 1.5) bg = texture2D(uBlurTex, vUv).rgb;
+    if (uBgMode < 1.5) {
+      // Desenfoque «sin halo»: el fondo se desenfocó sin la persona (alfa = cuánto fondo hubo en cada zona).
+      vec4 bb = texture2D(uBlurTex, vUv);
+      bg = bb.a > 0.02 ? bb.rgb / bb.a : c;
+    }
     else if (uBgMode < 2.5) bg = uBgColor;
     else bg = texture2D(uBgImage, uBgCrop.xy + vOut * uBgCrop.zw).rgb;
     c = mix(bg, c, m);
@@ -144,6 +154,36 @@ void main() {
   c += texture2D(uTex, vUv + uDir * 3.231).rgb * 0.070;
   c += texture2D(uTex, vUv - uDir * 3.231).rgb * 0.070;
   gl_FragColor = vec4(c, 1.0);
+}`;
+
+// Reducción + preparación del desenfoque: guarda el color solo donde hay fondo (sin la persona), para que
+// al desenfocar la silueta no «manche» el fondo con un halo.
+const PREP_FRAG = `
+precision mediump float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform sampler2D uMask;
+uniform float uUseMask;
+void main() {
+  vec3 c = texture2D(uTex, vUv).rgb;
+  float bgW = uUseMask > 0.5 ? 1.0 - smoothstep(0.25, 0.7, texture2D(uMask, vUv).r) : 1.0;
+  bgW = max(bgW, 0.015);
+  gl_FragColor = vec4(c * bgW, bgW);
+}`;
+
+// Gaussiano de 9 muestras sobre RGBA (color premultiplicado + peso del fondo).
+const BLUR4_FRAG = `
+precision mediump float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uDir;
+void main() {
+  vec4 c = texture2D(uTex, vUv) * 0.227;
+  c += texture2D(uTex, vUv + uDir * 1.385) * 0.316;
+  c += texture2D(uTex, vUv - uDir * 1.385) * 0.316;
+  c += texture2D(uTex, vUv + uDir * 3.231) * 0.070;
+  c += texture2D(uTex, vUv - uDir * 3.231) * 0.070;
+  gl_FragColor = c;
 }`;
 
 /** Recorte tipo «cover»: la parte central del fotograma con la proporción de salida. */
@@ -204,6 +244,8 @@ export class Grader {
     };
     this.main = link(VERT, FRAG);
     this.blur = link(BLUR_VERT, BLUR_FRAG);
+    this.prep = link(BLUR_VERT, PREP_FRAG);
+    this.blur4 = link(BLUR_VERT, BLUR4_FRAG);
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
@@ -217,7 +259,7 @@ export class Grader {
     gl.useProgram(this.main.prog);
     this.u = {};
     for (const n of ['uCrop', 'uTexel', 'uExposure', 'uBrightness', 'uContrast', 'uSaturation', 'uVibrance',
-      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette', 'uBg', 'uTex', 'uBlurTex', 'uMask', 'uBgImage', 'uBgMode', 'uBgColor', 'uBgCrop']) {
+      'uTemp', 'uTint', 'uHigh', 'uShadow', 'uSharp', 'uSmooth', 'uVignette', 'uBg', 'uTex', 'uBlurTex', 'uMask', 'uBgImage', 'uBgMode', 'uBgColor', 'uBgCrop', 'uMaskTexel']) {
       this.u[n] = gl.getUniformLocation(this.main.prog, n);
     }
     gl.uniform1i(this.u.uTex, 0);
@@ -231,6 +273,13 @@ export class Grader {
     gl.useProgram(this.blur.prog);
     this.ub = { uTex: gl.getUniformLocation(this.blur.prog, 'uTex'), uDir: gl.getUniformLocation(this.blur.prog, 'uDir') };
     gl.uniform1i(this.ub.uTex, 0);
+    gl.useProgram(this.prep.prog);
+    this.up = { uMask: gl.getUniformLocation(this.prep.prog, 'uMask'), uUseMask: gl.getUniformLocation(this.prep.prog, 'uUseMask') };
+    gl.uniform1i(gl.getUniformLocation(this.prep.prog, 'uTex'), 0);
+    gl.uniform1i(this.up.uMask, 2);
+    gl.useProgram(this.blur4.prog);
+    this.ub4 = { uDir: gl.getUniformLocation(this.blur4.prog, 'uDir') };
+    gl.uniform1i(gl.getUniformLocation(this.blur4.prog, 'uTex'), 0);
   }
 
   /** Imagen de fondo (ImageBitmap) para el modo «imagen». */
@@ -291,28 +340,37 @@ export class Grader {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
-  /** Genera el fondo desenfocado: reduce el fotograma y aplica el gaussiano varias veces. */
-  #blurBackground(srcW, srcH, amount) {
+  /**
+   * Genera el fondo desenfocado. `amount` (0..1) es progresivo: al principio es un desenfoque muy leve,
+   * como el de un objetivo luminoso, y al final uno fuerte. El radio se calcula en píxeles del lado corto
+   * (para 1080 px: de ~1 px a ~45 px) y la imagen se reduce solo lo necesario.
+   */
+  #blurBackground(srcW, srcH, amount, useMask) {
     const gl = this.gl;
-    // Más intensidad = imagen más pequeña y más pasadas.
-    const scale = 0.25 - amount * 0.13;
+    const short = Math.min(srcW, srcH);
+    const sigma = (0.6 + 44 * Math.pow(Math.max(0, amount), 1.7)) * (short / 1080);
+    const scale = Math.min(0.5, Math.max(0.07, 3 / Math.max(1, sigma)));
     const w = Math.max(16, Math.round(srcW * scale));
     const h = Math.max(16, Math.round(srcH * scale));
     const { a, b } = this.#ensureFbos(w, h);
+    // reducir + quitar la persona
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTex);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.useProgram(this.blur.prog);
-    gl.uniform2f(this.ub.uDir, 0, 0);
-    this.#pass(this.blur, a.fb, w, h);
-    const spread = 1 + amount * 1.5;
-    const iterations = amount > 0.6 ? 3 : amount > 0.25 ? 2 : 1;
-    for (let i = 0; i < iterations; i++) {
+    gl.useProgram(this.prep.prog);
+    gl.uniform1f(this.up.uUseMask, useMask ? 1 : 0);
+    this.#pass(this.prep, a.fb, w, h);
+    // dos pasadas H+V: sigma total ≈ 2,8 × separación (en píxeles reducidos)
+    const spread = Math.max(0.35, (sigma * scale) / 2.8);
+    gl.useProgram(this.blur4.prog);
+    for (let i = 0; i < 2; i++) {
       gl.bindTexture(gl.TEXTURE_2D, a.tex);
-      gl.uniform2f(this.ub.uDir, spread / w, 0);
-      this.#pass(this.blur, b.fb, w, h);
+      gl.uniform2f(this.ub4.uDir, spread / w, 0);
+      this.#pass(this.blur4, b.fb, w, h);
       gl.bindTexture(gl.TEXTURE_2D, b.tex);
-      gl.uniform2f(this.ub.uDir, 0, spread / h);
-      this.#pass(this.blur, a.fb, w, h);
+      gl.uniform2f(this.ub4.uDir, 0, spread / h);
+      this.#pass(this.blur4, a.fb, w, h);
     }
     return a.tex;
   }
@@ -359,7 +417,7 @@ export class Grader {
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, mask.width, mask.height, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, mask.data);
         this.maskVersion = mask.version;
       }
-      if (mode === 'blur') blurTex = this.#blurBackground(srcW, srcH, bg.blur);
+      if (mode === 'blur') blurTex = this.#blurBackground(srcW, srcH, bg.blur, true);
     }
 
     gl.useProgram(this.main.prog);
@@ -380,6 +438,7 @@ export class Grader {
       gl.uniform3f(u.uBgColor, col[0], col[1], col[2]);
       const [ix, iy, iw, ih] = coverCrop(this.bgImageSize[0], this.bgImageSize[1], W, H);
       gl.uniform4f(u.uBgCrop, ix, iy, iw, ih);
+      gl.uniform2f(u.uMaskTexel, 1 / Math.max(1, mask.width), 1 / Math.max(1, mask.height));
     }
     gl.uniform4f(u.uCrop, cx, cy, cw, ch);
     gl.uniform2f(u.uTexel, 1 / srcW, 1 / srcH);

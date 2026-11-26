@@ -98,15 +98,27 @@ export class Camera {
 
   #loop() {
     const v = this.video;
-    const draw = () => {
+    this.stats = { fps: 0, drawMs: 0 };
+    let lastDraw = 0;
+    const draw = (now, meta) => {
       if (!this.running) return;
       if (v.readyState >= 2 && v.videoWidth) {
         const bg = this.bgActive && this.mask.ready;
-        if (bg) this.mask.process(v);
+        const t = performance.now();
         this.grader.draw(v, v.videoWidth, v.videoHeight, bg ? this.mask : null, this.bg);
         this.frameCount++;
+        const st = this.stats;
+        st.drawMs = st.drawMs * 0.9 + (performance.now() - t) * 0.1;
+        if (lastDraw) st.fps = st.fps ? st.fps * 0.92 + (1000 / Math.max(1, t - lastDraw)) * 0.08 : 1000 / Math.max(1, t - lastDraw);
+        lastDraw = t;
         // Grabación del canvas: un fotograma por cada fotograma dibujado (sin duplicados ni saltos).
-        for (const t of this.captureTracks) t.requestFrame();
+        for (const track of this.captureTracks) track.requestFrame();
+        // Momento real de captura del fotograma (si el navegador lo da): aunque se dibuje un poco tarde,
+        // se graba con su hora de verdad y el movimiento no da saltos.
+        const cap = meta?.captureTime ?? meta?.expectedDisplayTime ?? null;
+        this.onFrame?.(typeof cap === 'number' && cap > 0 ? cap : performance.now());
+        // La silueta se pide después de entregar el fotograma (y se calcula en otro hilo).
+        if (bg) setTimeout(() => this.running && this.mask.process(v), 0);
       }
       schedule();
     };
